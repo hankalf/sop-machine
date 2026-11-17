@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import type { AppSettings, Category } from '../../../shared/types';
+import type { AppSettings, Category, LanguageOption, TranslatedContent } from '../../../shared/types';
 
 type Mode = 'recording' | 'notes' | 'import';
 
@@ -131,6 +131,8 @@ export interface FrameInput {
 }
 
 export interface GenerationContext {
+  /** Timed transcript of the narration, when the recording has spoken explanation. */
+  narration?: string;
   recordingType: 'screen' | 'physical';
   systemName: string;
   processName: string;
@@ -155,7 +157,13 @@ export function isAiConfigured() {
 let client: Anthropic | null = null;
 const getClient = () => (client ??= new Anthropic({ maxRetries: 3, timeout: 15 * 60 * 1000 }));
 
-async function callClaude(settings: AppSettings, mode: Mode, content: Anthropic.Beta.BetaContentBlockParam[]): Promise<unknown> {
+async function callClaude(
+  settings: AppSettings,
+  mode: Mode | 'translate',
+  content: Anthropic.Beta.BetaContentBlockParam[],
+  schemaOverride?: Record<string, unknown>,
+  systemOverride?: string,
+): Promise<unknown> {
   if (!isAiConfigured()) {
     throw new Error('AI is not configured. Add an ANTHROPIC_API_KEY variable to the Railway service.');
   }
@@ -166,8 +174,11 @@ async function callClaude(settings: AppSettings, mode: Mode, content: Anthropic.
       betas: ['server-side-fallback-2026-07-01'],
       fallbacks: 'default',
       thinking: { type: 'adaptive' },
-      output_config: { effort: settings.ai.effort, format: { type: 'json_schema', schema: jsonSchema(mode) } },
-      system: systemPrompt(settings),
+      output_config: {
+        effort: settings.ai.effort,
+        format: { type: 'json_schema', schema: schemaOverride ?? jsonSchema(mode as Mode) },
+      },
+      system: systemOverride ?? systemPrompt(settings),
       messages: [{ role: 'user', content }],
     });
     const message = await stream.finalMessage();
@@ -232,7 +243,17 @@ export async function sopFromFrames(settings: AppSettings, frames: FrameInput[],
 Context from the author:
 ${contextLines(ctx)}
 
-For each step:
+${
+  ctx.narration
+    ? `The author narrated while recording. Timed transcript (times match the frame labels):
+<narration>
+${ctx.narration}
+</narration>
+Use the narration for intent, values, warnings and tips that are not visible on screen, and turn spoken cautions into callouts. It comes from speech recognition, so ignore filler words and obvious recognition errors.
+
+`
+    : ''
+}For each step:
 - "frame": the index of the frame that best shows the moment the associate performs the step (for screens, usually the frame just before the action, where the target is visible). Use -1 when no frame fits. Use each frame for at most one step, and give most steps a frame.
 - "highlight": a tight bounding box in that frame's pixel coordinates around ${target}. Use all zeros when there is no single target or when frame is -1.
 Skip frames that only show transitions, loading screens or repeated content.`,
@@ -308,4 +329,85 @@ ${input.text ? `\nOriginal document text:\n<document>\n${input.text}\n</document
       effectiveDate: g.original.effective_date,
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Translation
+// ---------------------------------------------------------------------------
+
+const TranslationSchema = z.object({
+  title: z.string(),
+  purpose: z.string(),
+  scope: z.string(),
+  responsibilities: z.string(),
+  notes: z.string(),
+  safety: z.array(z.string()),
+  tools: z.array(z.string()),
+  steps: z.array(z.object({ id: z.string(), title: z.string(), body: z.string(), callout: z.string(), captions: z.array(z.string()) })),
+  attachments: z.array(z.string()),
+  checklistFields: z.array(z.string()),
+  strings: z.record(z.string(), z.string()),
+});
+
+function translationSchema(stringKeys: string[]) {
+  const arr = { type: 'array', items: { type: 'string' } };
+  const strProps = Object.fromEntries(stringKeys.map((k) => [k, { type: 'string' }]));
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['title', 'purpose', 'scope', 'responsibilities', 'notes', 'safety', 'tools', 'steps', 'attachments', 'checklistFields', 'strings'],
+    properties: {
+      title: { type: 'string' },
+      purpose: { type: 'string' },
+      scope: { type: 'string' },
+      responsibilities: { type: 'string' },
+      notes: { type: 'string' },
+      safety: arr,
+      tools: arr,
+      steps: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'title', 'body', 'callout', 'captions'],
+          properties: { id: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' }, callout: { type: 'string' }, captions: arr },
+        },
+      },
+      attachments: arr,
+      checklistFields: arr,
+      strings: { type: 'object', additionalProperties: false, required: stringKeys, properties: strProps },
+    },
+  };
+}
+
+/** Translate an SOP's text (and the fixed document wording) for frontline associates. */
+export async function translateSop(
+  settings: AppSettings,
+  source: { content: TranslatedContent; strings: Record<string, string> },
+  language: LanguageOption,
+): Promise<{ content: TranslatedContent; strings: Record<string, string> }> {
+  const system = `You translate warehouse Standard Operating Procedures from English into ${language.name} (${language.native}) for frontline associates.
+
+Rules:
+- Plain, natural ${language.name} at a basic reading level, in the same direct, imperative style as the English.
+- Translate faithfully. Do not add, drop or soften any step, value, warning or safety requirement.
+- Keep markdown exactly as in the source: **bold**, *italic*, "- " and "1. " lists, line breaks.
+- Software labels in **bold** (buttons, fields, menus, screen names) stay in English because the screen shows them that way. Add the translation in parentheses after the first mention in each step, e.g. **Confirm Receipt** (Confirmar recepción).
+- Keep SOP numbers, item and location codes, units, model numbers, acronyms (WMS, LPN, PPE…) and product or system names unchanged.
+- Keep every step "id" exactly, and keep every list the same length and order as the source. Empty strings stay empty.
+- "strings" are fixed labels printed on the document. Translate each one; keep placeholders like {company} or {title} unchanged and keep the callout words (DANGER, WARNING, CAUTION, NOTE, TIP) in capitals.${
+    settings.languages.glossary.trim() ? `\n\nGlossary and preferences from the administrator:\n${settings.languages.glossary.trim()}` : ''
+  }`;
+  const payload = { ...source.content, strings: source.strings };
+  const raw = await callClaude(
+    settings,
+    'translate',
+    [{ type: 'text', text: `Translate this SOP into ${language.name}.\n<source>\n${JSON.stringify(payload, null, 1)}\n</source>` }],
+    translationSchema(Object.keys(source.strings)),
+    system,
+  );
+  const parsed = TranslationSchema.safeParse(raw);
+  if (!parsed.success) throw new Error(`The translation was not in the expected format: ${parsed.error.issues[0]?.message}`);
+  const { strings, ...content } = parsed.data;
+  return { content, strings };
 }

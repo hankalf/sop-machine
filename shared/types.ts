@@ -7,6 +7,7 @@ export interface User {
   email: string;
   name: string;
   role: Role;
+  language: string;
   disabled: boolean;
   createdAt: string;
   lastLoginAt: string | null;
@@ -36,7 +37,24 @@ export interface Step {
   media: StepMedia[];
 }
 
+export interface ChecklistField {
+  id: string;
+  label: string;
+  required: boolean;
+}
+
+/** Lets an SOP be run as a fill-in checklist (e.g. a trailer pre-load inspection). */
+export interface ChecklistConfig {
+  enabled: boolean;
+  style: 'check' | 'passfail';
+  /** Record fields filled in at the start, e.g. Trailer #, Door, Seal #. */
+  fields: ChecklistField[];
+  requireSignature: boolean;
+  requireNoteOnFail: boolean;
+}
+
 export interface SopContent {
+  checklist: ChecklistConfig;
   purpose: string;
   scope: string;
   responsibilities: string;
@@ -61,6 +79,8 @@ export interface SopSummary {
   tags: string[];
   coverMediaId: string | null;
   stepCount: number;
+  /** Can be run as a fill-in checklist. */
+  checklist: boolean;
   publishedVersion: string | null;
   reviewDate: string | null;
   createdAt: string;
@@ -76,10 +96,12 @@ export interface Sop extends SopSummary {
   approvedBy: string | null;
   approvedAt: string | null;
   publishedRevisionId: string | null;
+  ownerUserId: string | null;
 }
 
 /** Fields an editor can change through PUT /api/sops/:id */
 export interface SopUpdate {
+  ownerUserId?: string | null;
   number?: string;
   title?: string;
   categoryId?: string | null;
@@ -258,6 +280,27 @@ export interface AppSettings {
     requireApproval: boolean;
     reviewIntervalMonths: number;
   };
+  training: {
+    /** Ask everyone to sign off ("read and understood") on approved SOPs. */
+    enabled: boolean;
+  };
+  languages: {
+    /** Translation targets, e.g. ["es"]. */
+    enabled: string[];
+    /** Re-translate automatically when an SOP is approved. */
+    autoTranslate: boolean;
+    /** Terms to keep as-is or translate a certain way. */
+    glossary: string;
+  };
+  notifications: {
+    enabled: boolean;
+    reviewReminderDays: number;
+    onSubmitted: boolean;
+    onApproved: boolean;
+    onNewRevision: boolean;
+    /** Extra addresses (comma separated) copied on review and approval emails. */
+    extraRecipients: string;
+  };
   ai: {
     model: string;
     effort: 'low' | 'medium' | 'high' | 'xhigh';
@@ -265,6 +308,8 @@ export interface AppSettings {
     autoHighlight: boolean;
     writingStyle: string;
     extraInstructions: string;
+    /** Transcribe narration in recordings when a speech-to-text service is configured. */
+    useNarration: boolean;
   };
 }
 
@@ -283,14 +328,18 @@ export interface PublicBranding {
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
+export type JobType = 'recording' | 'notes' | 'import' | 'translate' | 'binder' | 'storage';
+
 export interface GenerationJob {
   id: string;
-  type: 'recording' | 'notes' | 'import';
+  type: JobType;
   status: JobStatus;
   progress: number;
   message: string;
   title: string;
   resultSopId: string | null;
+  /** Set when the job produced a file to download (binders). */
+  downloadUrl: string | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -305,4 +354,174 @@ export interface SystemInfo {
   counts: { sops: number; media: number; users: number; templates: number };
   versions: { app: string; node: string };
   pdfEngine: { ok: boolean; detail: string };
+  storage: { driver: 'local' | 's3'; bucket: string | null; localFiles: number; objectFiles: number };
+  email: { configured: boolean; from: string | null };
+  transcription: { configured: boolean; model: string | null };
+}
+
+// ---------------------------------------------------------------------------
+// Translations
+// ---------------------------------------------------------------------------
+
+export interface LanguageOption {
+  code: string;
+  name: string;
+  native: string;
+  rtl?: boolean;
+}
+
+export interface TranslatedContent {
+  title: string;
+  purpose: string;
+  scope: string;
+  responsibilities: string;
+  notes: string;
+  safety: string[];
+  tools: string[];
+  steps: { id: string; title: string; body: string; callout: string; captions: string[] }[];
+  attachments: string[];
+  checklistFields: string[];
+}
+
+export interface SopTranslation {
+  id: string;
+  sopId: string;
+  language: string;
+  content: TranslatedContent;
+  /** Fixed document wording (labels, section names, footer) in this language. */
+  strings: Record<string, string>;
+  sourceVersion: string;
+  status: 'machine' | 'reviewed';
+  /** True when the SOP text changed after this translation was made. */
+  outdated: boolean;
+  updatedAt: string;
+  updatedByName: string | null;
+}
+
+export type LanguageMode = 'en' | 'tr' | 'bi';
+
+// ---------------------------------------------------------------------------
+// Training sign-off
+// ---------------------------------------------------------------------------
+
+export interface Acknowledgment {
+  id: string;
+  sopId: string;
+  version: string;
+  personKey: string;
+  personName: string;
+  employeeId: string;
+  userId: string | null;
+  method: 'app' | 'station' | 'recorded';
+  recordedByName: string | null;
+  stationName: string | null;
+  note: string;
+  createdAt: string;
+  /** Signed the version that is currently published. */
+  current: boolean;
+}
+
+export interface TrainingPerson {
+  key: string;
+  name: string;
+  employeeId: string;
+  userId: string | null;
+  role: Role | null;
+}
+
+export interface TrainingMatrix {
+  people: TrainingPerson[];
+  sops: { id: string; number: string; title: string; version: string; categoryId: string | null }[];
+  /** cells[personKey][sopId] */
+  cells: Record<string, Record<string, { version: string; current: boolean; at: string }>>;
+}
+
+// ---------------------------------------------------------------------------
+// Stations & QR placards
+// ---------------------------------------------------------------------------
+
+export interface Station {
+  id: string;
+  name: string;
+  area: string;
+  token: string;
+  sopIds: string[];
+  publicAccess: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StationSopSummary {
+  id: string;
+  number: string;
+  title: string;
+  version: string;
+  effectiveDate: string | null;
+  categoryName: string | null;
+  categoryColor: string | null;
+  checklist: boolean;
+  languages: string[];
+  /** SOP title per available language. */
+  titles: Record<string, string>;
+}
+
+export interface PublicStationView {
+  station: { id: string; name: string; area: string; publicAccess: boolean };
+  branding: PublicBranding;
+  sops: StationSopSummary[];
+  trainingEnabled: boolean;
+  languages: LanguageOption[];
+  signedIn: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Checklist runs
+// ---------------------------------------------------------------------------
+
+export type CheckResult = 'pass' | 'fail' | 'na' | 'done';
+
+export interface CheckItemResult {
+  result: CheckResult | null;
+  note: string;
+  mediaIds: string[];
+  at: string | null;
+}
+
+export interface ChecklistRunSummary {
+  id: string;
+  token: string;
+  sopId: string;
+  sopNumber: string;
+  sopTitle: string;
+  version: string;
+  stationName: string | null;
+  performerName: string;
+  employeeId: string;
+  fields: Record<string, string>;
+  /** Record fields with their (English) labels, for lists and exports. */
+  fieldValues: { label: string; value: string }[];
+  status: 'in_progress' | 'completed';
+  failCount: number;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export interface ChecklistRunStep {
+  id: string;
+  kind: 'step' | 'section';
+  number: number;
+  title: string;
+  bodyHtml: string;
+  callout: { type: CalloutType; html: string; label: string };
+  mediaIds: string[];
+}
+
+export interface ChecklistRun extends ChecklistRunSummary {
+  language: string;
+  results: Record<string, CheckItemResult>;
+  signature: string;
+  checklist: ChecklistConfig;
+  fieldLabels: Record<string, string>;
+  steps: ChecklistRunStep[];
+  mediaBase: string;
 }

@@ -13,6 +13,7 @@ const MODELS = [
 export default function AiSettings() {
   const { form, set, save, saving, dirty, reset, loading } = useSettingsForm();
   const status = useQuery({ queryKey: ['ai-status'], queryFn: api.generate.status });
+  const system = useQuery({ queryKey: ['system'], queryFn: api.system });
   if (loading || !form) return <PageLoader />;
   const a = form.ai;
   return (
@@ -58,6 +59,16 @@ export default function AiSettings() {
           <Input type="number" min={5} max={80} value={a.maxFrames} onChange={(e) => set('ai', { maxFrames: Number(e.target.value) })} />
         </Field>
         <Toggle checked={a.autoHighlight} onChange={(v) => set('ai', { autoHighlight: v })} label="Highlight what to click" description="Draws a red box around the button or field in each screenshot. You can redo it in the editor." />
+        <Toggle
+          checked={a.useNarration}
+          onChange={(v) => set('ai', { useNarration: v })}
+          label="Use spoken narration"
+          description={
+            system.data?.transcription.configured
+              ? `Talk while you record: explanations and warnings you say out loud are added to the steps. Speech-to-text: ${system.data.transcription.model}.`
+              : 'Needs a speech-to-text service. Add GROQ_API_KEY (has a free tier) or OPENAI_API_KEY in Railway. Until then recordings are read from the picture only.'
+          }
+        />
       </Card>
       <Card title="Writing style" className="lg:col-span-2" bodyClassName="space-y-4">
         <Field label="House style" hint="Applied to every generated or imported SOP.">

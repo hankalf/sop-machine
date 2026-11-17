@@ -19,7 +19,17 @@ async function getBrowser(): Promise<Browser> {
       .launch({
         executablePath: config.chromiumPath,
         headless: true,
-        args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--font-render-hinting=none'],
+        args: [
+          '--no-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--font-render-hinting=none',
+          // The renderer only ever loads our own intercepted assets; keep the browser itself quiet too.
+          '--disable-background-networking',
+          '--disable-component-update',
+          '--disable-sync',
+          '--no-first-run',
+        ],
       })
       .then((b) => {
         b.on('disconnected', () => {
@@ -50,7 +60,16 @@ async function slot<T>(fn: () => Promise<T>): Promise<T> {
  * Render paged HTML (Paged.js) to PDF in headless Chromium.
  * All assets are served from disk through request interception; external network is blocked.
  */
-export async function htmlToPdf(html: string, meta: { title: string; author: string; subject: string; keywords: string[] }): Promise<Buffer> {
+/**
+ * paged: the document uses Paged.js (SOPs). Otherwise it is a plain page sized with CSS @page
+ * (QR placards, binder covers) and is printed as soon as fonts and images have loaded.
+ */
+export async function htmlToPdf(
+  html: string,
+  meta: { title: string; author: string; subject: string; keywords: string[] },
+  opts: { paged?: boolean } = {},
+): Promise<Buffer> {
+  const paged = opts.paged !== false;
   return slot(async () => {
     const browser = await getBrowser();
     const page = await browser.newPage();
@@ -72,7 +91,8 @@ export async function htmlToPdf(html: string, meta: { title: string; author: str
           .catch(() => req.respond({ status: 500, body: '' }));
       });
       await page.goto(`${ORIGIN}/__document`, { waitUntil: 'load', timeout: 120_000 });
-      await page.waitForFunction('window.__pagedDone === true', { timeout: 180_000, polling: 100 });
+      if (paged) await page.waitForFunction('window.__pagedDone === true', { timeout: 180_000, polling: 100 });
+      else await page.evaluate('document.fonts.ready.then(() => true)');
       const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true, timeout: 180_000 });
       const doc = await PDFDocument.load(pdf);
       doc.setTitle(meta.title);

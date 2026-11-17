@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { defaultChecklist } from '../../../shared/defaults';
 import type { Category, Revision, Sop } from '../../../shared/types';
 import { getMeta, setMeta } from '../db';
 import { findMedia, storeBuffer } from '../services/media';
@@ -67,6 +68,7 @@ export async function sampleSop(): Promise<{ sop: Sop; category: Category; revis
     source: 'manual',
     coverMediaId: ids.photo,
     stepCount: 5,
+    checklist: false,
     publishedVersion: '2.0',
     publishedRevisionId: null,
     createdBy: null,
@@ -75,7 +77,9 @@ export async function sampleSop(): Promise<{ sop: Sop; category: Category; revis
     approvedAt: null,
     createdAt: now,
     updatedAt: now,
+    ownerUserId: null,
     content: {
+      checklist: { ...defaultChecklist(), fields: [{ id: 'trailer', label: 'Trailer #', required: true }, { id: 'door', label: 'Dock door', required: true }] },
       purpose:
         'Make sure every inbound trailer is checked in, secured and unloaded safely, and that the receipt in the WMS matches what was physically delivered.',
       scope: 'Applies to all inbound trailers at **dock doors D-01 to D-12**, on every shift.',

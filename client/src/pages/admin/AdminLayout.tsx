@@ -1,4 +1,4 @@
-import { Bot, Building2, FileOutput, HardDrive, LayoutTemplate, Tags, Users } from 'lucide-react';
+import { Bot, Building2, FileOutput, HardDrive, Languages, LayoutTemplate, Mail, Tags, Users } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { cx } from '../../components/ui';
 
@@ -8,6 +8,8 @@ const TABS = [
   { to: 'export', label: 'Export & workflow', icon: FileOutput },
   { to: 'categories', label: 'Categories', icon: Tags },
   { to: 'users', label: 'Users', icon: Users },
+  { to: 'languages', label: 'Languages', icon: Languages },
+  { to: 'email', label: 'Email', icon: Mail },
   { to: 'ai', label: 'AI', icon: Bot },
   { to: 'system', label: 'Storage & backup', icon: HardDrive },
 ];

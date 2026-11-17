@@ -112,6 +112,91 @@ const migrations: string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // 2: training sign-off, stations, translations, checklists, notifications, object storage
+  `
+  ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'en';
+  ALTER TABLE sops ADD COLUMN owner_user_id TEXT;
+  ALTER TABLE media ADD COLUMN storage TEXT NOT NULL DEFAULT 'local';
+  ALTER TABLE jobs ADD COLUMN result_file TEXT;
+
+  CREATE TABLE acknowledgments (
+    id TEXT PRIMARY KEY,
+    sop_id TEXT NOT NULL REFERENCES sops(id) ON DELETE CASCADE,
+    revision_id TEXT,
+    version TEXT NOT NULL,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    person_key TEXT NOT NULL,
+    person_name TEXT NOT NULL,
+    employee_id TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL,
+    recorded_by TEXT,
+    station_id TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX ack_sop ON acknowledgments(sop_id, version);
+  CREATE INDEX ack_person ON acknowledgments(person_key);
+
+  CREATE TABLE stations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    area TEXT NOT NULL DEFAULT '',
+    token TEXT NOT NULL UNIQUE,
+    sop_ids TEXT NOT NULL DEFAULT '[]',
+    public_access INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE translations (
+    id TEXT PRIMARY KEY,
+    sop_id TEXT NOT NULL REFERENCES sops(id) ON DELETE CASCADE,
+    language TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    strings TEXT NOT NULL DEFAULT '{}',
+    source_hash TEXT NOT NULL,
+    source_version TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'machine',
+    updated_by TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE (sop_id, language, source_hash)
+  );
+  CREATE INDEX translations_sop ON translations(sop_id, language, updated_at);
+
+  CREATE TABLE checklist_runs (
+    id TEXT PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    sop_id TEXT NOT NULL REFERENCES sops(id) ON DELETE CASCADE,
+    version TEXT NOT NULL,
+    station_id TEXT,
+    user_id TEXT,
+    performer_name TEXT NOT NULL,
+    employee_id TEXT NOT NULL DEFAULT '',
+    language TEXT NOT NULL DEFAULT 'en',
+    fields TEXT NOT NULL DEFAULT '{}',
+    results TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'in_progress',
+    fail_count INTEGER NOT NULL DEFAULT 0,
+    signature TEXT NOT NULL DEFAULT '',
+    snapshot TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+  CREATE INDEX runs_sop ON checklist_runs(sop_id, started_at);
+
+  CREATE TABLE notifications (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    dedupe_key TEXT NOT NULL UNIQUE,
+    sop_id TEXT,
+    recipients TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error TEXT,
+    created_at TEXT NOT NULL
+  );
+  `,
 ];
 
 function migrate() {

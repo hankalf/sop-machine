@@ -1,5 +1,5 @@
 import { STATUS_LABELS, fillTokens } from '../../../shared/defaults';
-import type { Sop } from '../../../shared/types';
+import type { Sop, SopTranslation } from '../../../shared/types';
 import { getSettings } from '../services/settings';
 import { safeFilename } from '../util';
 import { buildContext } from './context';
@@ -7,9 +7,14 @@ import { renderDocx } from './docx';
 import { renderHtml } from './html';
 import { htmlToPdf } from './pdf';
 
-export async function exportSop(sop: Sop, format: 'pdf' | 'docx'): Promise<{ data: Buffer; filename: string; contentType: string }> {
+export async function exportSop(
+  sop: Sop,
+  format: 'pdf' | 'docx',
+  lang: { translation: SopTranslation | null; bilingual: boolean } = { translation: null, bilingual: false },
+): Promise<{ data: Buffer; filename: string; contentType: string }> {
   const settings = getSettings();
-  const ctx = await buildContext(sop, { mode: 'paged', purpose: 'pdf' });
+  const t = lang.translation;
+  const ctx = await buildContext(sop, { mode: 'paged', purpose: 'pdf', language: t?.language ?? 'en', bilingual: lang.bilingual, translation: t });
   const base = safeFilename(
     fillTokens(settings.export.filenamePattern, {
       number: sop.number,
@@ -19,7 +24,7 @@ export async function exportSop(sop: Sop, format: 'pdf' | 'docx'): Promise<{ dat
       date: new Date().toISOString().slice(0, 10),
       company: settings.branding.companyName,
     }),
-  );
+  ) + (t ? ` (${lang.bilingual ? `EN-${t.language.toUpperCase()}` : t.language.toUpperCase()})` : '');
   if (format === 'docx') {
     return {
       data: await renderDocx(ctx),

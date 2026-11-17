@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlarmClock, BookOpen, FileText, FileUp, LayoutGrid, List, Plus, Search, Sparkles } from 'lucide-react';
+import { AlarmClock, BookMarked, BookOpen, FileText, FileUp, LayoutGrid, List, ListChecks, Plus, Search, Sparkles } from 'lucide-react';
+import { BinderModal } from '../components/BinderModal';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { Category, SopSummary } from '@shared/types';
@@ -25,6 +26,7 @@ export default function LibraryPage() {
   const [status, setStatus] = useState('');
   const [view, setView] = useState<'grid' | 'list'>(() => (localStorage.getItem('sop:view') as 'grid' | 'list') ?? 'grid');
   const [creating, setCreating] = useState(false);
+  const [binder, setBinder] = useState(false);
   const debounced = useDebounced(search, 250);
 
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.categories.list });
@@ -63,8 +65,16 @@ export default function LibraryPage() {
           <h1 className="text-2xl font-bold tracking-tight">SOP Library</h1>
           <p className="text-sm text-slate-500">Every standard operating procedure in one place, from computer systems to the trailer dock.</p>
         </div>
+        {!isEditor && (
+          <Button icon={<BookMarked className="size-4" />} onClick={() => setBinder(true)}>
+            Export binder
+          </Button>
+        )}
         {isEditor && (
           <div className="flex flex-wrap gap-2">
+            <Button icon={<BookMarked className="size-4" />} onClick={() => setBinder(true)}>
+              Export binder
+            </Button>
             <Link to="/generate?tab=import">
               <Button icon={<FileUp className="size-4" />}>Import existing SOPs</Button>
             </Link>
@@ -191,6 +201,7 @@ export default function LibraryPage() {
       )}
 
       <NewSopModal open={creating} onClose={() => setCreating(false)} categories={categories.data ?? []} defaultCategory={categoryId} />
+      {binder && <BinderModal open onClose={() => setBinder(false)} categories={categories.data ?? []} defaultCategory={categoryId} />}
     </div>
   );
 }
@@ -234,6 +245,11 @@ function SopCard({ sop, category }: { sop: SopSummary; category?: Category }) {
         )}
         <div className="absolute top-2 left-2 flex gap-1.5">
           <StatusBadge status={sop.status} className="shadow-sm" />
+          {sop.checklist && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 shadow-sm">
+              <ListChecks className="size-3" /> Checklist
+            </span>
+          )}
           {sop.source !== 'manual' && (
             <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-800 shadow-sm">
               <Sparkles className="size-3" /> AI

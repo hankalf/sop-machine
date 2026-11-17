@@ -1,5 +1,6 @@
 import QRCode from 'qrcode';
-import type { AppSettings, Category, MediaItem, Revision, Sop, TemplateDesign } from '../../../shared/types';
+import { languageInfo } from '../../../shared/defaults';
+import type { AppSettings, Category, LanguageMode, MediaItem, Revision, Sop, SopTranslation, TemplateDesign } from '../../../shared/types';
 import { config } from '../config';
 import { mediaMap } from '../services/media';
 import { getSettings } from '../services/settings';
@@ -9,7 +10,17 @@ import { getCategory, resolveTemplate } from '../services/templates';
 export type RenderMode = 'web' | 'paged';
 export type RenderPurpose = 'view' | 'preview' | 'pdf';
 
+export interface RenderLanguage {
+  mode: LanguageMode;
+  code: string;
+  rtl: boolean;
+  t: SopTranslation | null;
+}
+
 export interface RenderContext {
+  lang: RenderLanguage;
+  /** URL prefix for media; public station pages use their own token-scoped prefix. */
+  mediaBase: string;
   sop: Sop;
   category: Category | null;
   design: TemplateDesign;
@@ -53,6 +64,12 @@ export async function buildContext(
     revisions?: Revision[];
     settings?: AppSettings;
     category?: Category | null;
+    /** Language code to render ('en' or a translated language). */
+    language?: string;
+    bilingual?: boolean;
+    /** Translation to use (already looked up by the caller). */
+    translation?: SopTranslation | null;
+    mediaBase?: string;
   },
 ): Promise<RenderContext> {
   const category = opts.category !== undefined ? opts.category : getCategory(sop.categoryId);
@@ -69,7 +86,14 @@ export async function buildContext(
     }
   }
 
+  const t = opts.language && opts.language !== 'en' ? (opts.translation ?? null) : null;
+  const lang: RenderLanguage = t
+    ? { mode: opts.bilingual ? 'bi' : 'tr', code: t.language, rtl: !!languageInfo(t.language).rtl, t }
+    : { mode: 'en', code: 'en', rtl: false, t: null };
+
   return {
+    lang,
+    mediaBase: opts.mediaBase ?? '/api/media',
     sop,
     category,
     design,

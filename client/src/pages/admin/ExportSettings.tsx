@@ -39,6 +39,7 @@ export default function ExportSettings() {
       <div className="space-y-6">
         <Card title="Approval workflow" bodyClassName="space-y-5">
           <Toggle checked={form.workflow.requireApproval} onChange={(v) => set('workflow', { requireApproval: v })} label="Only admins can approve" description="Editors submit SOPs for review; an admin approves and publishes them." />
+          <Toggle checked={form.training.enabled} onChange={(v) => set('training', { enabled: v })} label="Training sign-off" description="Ask people to confirm they have read and understood each approved SOP, and again after every new revision." />
           <Field label="Review every (months)" hint="Sets the next review date on approval. 0 turns it off. SOPs due within 30 days are flagged in the library.">
             <Input type="number" min={0} max={60} value={form.workflow.reviewIntervalMonths} onChange={(ev) => set('workflow', { reviewIntervalMonths: Number(ev.target.value) })} />
           </Field>

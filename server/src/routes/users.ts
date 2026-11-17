@@ -14,11 +14,14 @@ usersRouter.get('/', (_req, res) => {
 });
 
 usersRouter.post('/', (req, res) => {
-  const body = parseBody(z.object({ email: z.email(), name: z.string().trim().min(1), role, password: z.string().min(8) }), req);
+  const body = parseBody(
+    z.object({ email: z.email(), name: z.string().trim().min(1), role, password: z.string().min(8), language: z.string().min(2).max(8).default('en') }),
+    req,
+  );
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(body.email)) throw badRequest('A user with that email already exists');
   const id = newId();
-  db.prepare('INSERT INTO users (id, email, name, role, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
-    id, body.email.trim(), body.name, body.role, hashPassword(body.password), nowIso(),
+  db.prepare('INSERT INTO users (id, email, name, role, language, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    id, body.email.trim(), body.name, body.role, body.language, hashPassword(body.password), nowIso(),
   );
   res.status(201).json(toUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Parameters<typeof toUser>[0]));
 });
@@ -30,7 +33,13 @@ function adminCount(excludeId: string) {
 usersRouter.put('/:id', (req, res) => {
   const id = param(req, 'id');
   const body = parseBody(
-    z.object({ name: z.string().trim().min(1).optional(), role: role.optional(), disabled: z.boolean().optional(), password: z.string().min(8).optional() }),
+    z.object({
+      name: z.string().trim().min(1).optional(),
+      role: role.optional(),
+      disabled: z.boolean().optional(),
+      password: z.string().min(8).optional(),
+      language: z.string().min(2).max(8).optional(),
+    }),
     req,
   );
   const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Parameters<typeof toUser>[0] & { password_hash: string } | undefined;
@@ -38,6 +47,7 @@ usersRouter.put('/:id', (req, res) => {
   const demoting = (body.role && body.role !== 'admin') || body.disabled === true;
   if (row.role === 'admin' && demoting && adminCount(id) === 0) throw badRequest('There must be at least one active administrator');
   if (id === req.user!.id && body.disabled) throw badRequest('You cannot disable your own account');
+  if (body.language) db.prepare('UPDATE users SET language = ? WHERE id = ?').run(body.language, id);
   db.prepare('UPDATE users SET name = ?, role = ?, disabled = ?, password_hash = ? WHERE id = ?').run(
     body.name ?? row.name,
     body.role ?? row.role,

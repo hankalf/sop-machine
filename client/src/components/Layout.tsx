@@ -1,4 +1,4 @@
-import { BookOpen, LogOut, Menu, Settings, Sparkles, UserCircle2, X } from 'lucide-react';
+import { BookOpen, GraduationCap, ListChecks, LogOut, MapPin, Menu, Settings, Sparkles, UserCircle2, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -43,6 +43,9 @@ export default function Layout() {
   const links = [
     { to: '/', label: 'SOP Library', icon: BookOpen, end: true, show: true },
     { to: '/generate', label: 'Generate & import', icon: Sparkles, show: isEditor },
+    { to: '/training', label: 'Training', icon: GraduationCap, show: isEditor },
+    { to: '/stations', label: 'Stations & QR', icon: MapPin, show: isEditor },
+    { to: '/records', label: 'Checklist records', icon: ListChecks, show: isEditor },
     { to: '/admin', label: 'Admin', icon: Settings, show: isAdmin },
   ];
 

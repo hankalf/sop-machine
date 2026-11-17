@@ -6,7 +6,9 @@ import { z } from 'zod';
 import { requireRole } from '../auth';
 import { config } from '../config';
 import { isAiConfigured } from '../services/ai';
-import { createJob, getJob, listJobs } from '../services/generator';
+import type { JobType } from '../../../shared/types';
+import { createJob, getJob, jobFile, listJobs } from '../services/generator';
+import { contentDisposition } from '../render/export';
 import { documentKind } from '../services/documents';
 import { storeFile } from '../services/media';
 import { badRequest, newId, param } from '../util';
@@ -119,8 +121,19 @@ generateRouter.post('/import', upload.array('documents', 25), async (req, res) =
 
 export const jobsRouter = Router();
 jobsRouter.use(requireRole('editor'));
-jobsRouter.get('/', (_req, res) => {
-  res.json(listJobs());
+const ALL_TYPES: JobType[] = ['recording', 'notes', 'import', 'translate', 'binder', 'storage'];
+jobsRouter.get('/', (req, res) => {
+  const wanted = String(req.query.types ?? 'recording,notes,import,translate')
+    .split(',')
+    .filter((t): t is JobType => (ALL_TYPES as string[]).includes(t));
+  res.json(listJobs(wanted.length ? wanted : ALL_TYPES));
+});
+jobsRouter.get('/:id/download', (req, res) => {
+  const f = jobFile(param(req, 'id'));
+  if (!f) throw badRequest('This file has expired. Build it again.');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', contentDisposition(`${f.title}.pdf`));
+  res.sendFile(f.file);
 });
 jobsRouter.get('/:id', (req, res) => {
   res.json(getJob(param(req, 'id')));

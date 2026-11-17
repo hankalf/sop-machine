@@ -17,7 +17,7 @@ export default function GeneratePage() {
   const templates = useQuery({ queryKey: ['templates'], queryFn: api.templates.list });
   const jobs = useQuery({
     queryKey: ['jobs'],
-    queryFn: api.jobs.list,
+    queryFn: () => api.jobs.list('recording,notes,import'),
     refetchInterval: (q) => (q.state.data?.some((j) => j.status === 'queued' || j.status === 'running') ? 1500 : false),
   });
 

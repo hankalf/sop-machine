@@ -1,7 +1,9 @@
 import type {
   AppSettings,
   CalloutType,
+  ChecklistConfig,
   FontKey,
+  LanguageOption,
   SectionConfig,
   SectionKey,
   SopContent,
@@ -230,6 +232,16 @@ export function defaultSettings(): AppSettings {
       allowViewerExport: true,
     },
     workflow: { requireApproval: true, reviewIntervalMonths: 12 },
+    training: { enabled: true },
+    languages: { enabled: ['es'], autoTranslate: false, glossary: '' },
+    notifications: {
+      enabled: true,
+      reviewReminderDays: 30,
+      onSubmitted: true,
+      onApproved: true,
+      onNewRevision: true,
+      extraRecipients: '',
+    },
     ai: {
       model: 'claude-opus-5-5',
       effort: 'high',
@@ -238,12 +250,18 @@ export function defaultSettings(): AppSettings {
       writingStyle:
         'Plain, direct language for frontline warehouse associates. Imperative voice ("Scan the pallet label"). One action per step. Put exact on-screen button, field and menu names in bold.',
       extraInstructions: '',
+      useNarration: true,
     },
   };
 }
 
+export function defaultChecklist(): ChecklistConfig {
+  return { enabled: false, style: 'passfail', fields: [], requireSignature: true, requireNoteOnFail: true };
+}
+
 export function emptyContent(): SopContent {
   return {
+    checklist: defaultChecklist(),
     purpose: '',
     scope: '',
     responsibilities: '',
@@ -312,3 +330,71 @@ export const STATUS_LABELS: Record<string, string> = {
   approved: 'Approved',
   archived: 'Archived',
 };
+
+export const LANGUAGES: LanguageOption[] = [
+  { code: 'es', name: 'Spanish', native: 'Español' },
+  { code: 'fr', name: 'French', native: 'Français' },
+  { code: 'pt', name: 'Portuguese', native: 'Português' },
+  { code: 'ht', name: 'Haitian Creole', native: 'Kreyòl ayisyen' },
+  { code: 'vi', name: 'Vietnamese', native: 'Tiếng Việt' },
+  { code: 'zh', name: 'Chinese (Simplified)', native: '简体中文' },
+  { code: 'tl', name: 'Tagalog', native: 'Tagalog' },
+  { code: 'ko', name: 'Korean', native: '한국어' },
+  { code: 'ar', name: 'Arabic', native: 'العربية', rtl: true },
+  { code: 'so', name: 'Somali', native: 'Soomaali' },
+  { code: 'ne', name: 'Nepali', native: 'नेपाली' },
+  { code: 'my', name: 'Burmese', native: 'မြန်မာ' },
+  { code: 'sw', name: 'Swahili', native: 'Kiswahili' },
+  { code: 'ru', name: 'Russian', native: 'Русский' },
+  { code: 'uk', name: 'Ukrainian', native: 'Українська' },
+  { code: 'pl', name: 'Polish', native: 'Polski' },
+  { code: 'hi', name: 'Hindi', native: 'हिन्दी' },
+  { code: 'de', name: 'German', native: 'Deutsch' },
+];
+
+export const languageInfo = (code: string): LanguageOption => LANGUAGES.find((l) => l.code === code) ?? { code, name: code.toUpperCase(), native: code.toUpperCase() };
+
+/**
+ * Fixed wording printed on every SOP. Translated together with the SOP content so a
+ * Spanish export is Spanish throughout (labels, tables, callouts, footer).
+ */
+export const DOC_STRINGS = {
+  docNo: 'Document No.',
+  version: 'Version',
+  status: 'Status',
+  category: 'Category',
+  effectiveDate: 'Effective date',
+  nextReview: 'Next review',
+  owner: 'Owner',
+  approver: 'Approver',
+  onApproval: 'On approval',
+  statusDraft: 'Draft',
+  statusReview: 'In Review',
+  statusApproved: 'Approved',
+  statusArchived: 'Archived',
+  step: 'Step',
+  video: 'Video',
+  scanVideo: 'Scan to watch the video',
+  length: 'Length',
+  openDigital: 'Open the digital SOP to watch.',
+  scanLatest: 'Scan for the latest version',
+  revDate: 'Date',
+  revChange: 'Description of change',
+  revApprovedBy: 'Approved by',
+  initialRelease: 'Initial release (pending approval)',
+  role: 'Role',
+  name: 'Name',
+  signature: 'Signature',
+  date: 'Date',
+  preparedBy: 'Prepared by',
+  reviewedBy: 'Reviewed by',
+  approvedBy: 'Approved by',
+  danger: 'DANGER',
+  warning: 'WARNING',
+  caution: 'CAUTION',
+  note: 'NOTE',
+  tip: 'TIP',
+  noSteps: 'No steps yet.',
+} as const;
+
+export type DocStringKey = keyof typeof DOC_STRINGS;

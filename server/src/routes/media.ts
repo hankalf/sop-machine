@@ -1,8 +1,8 @@
-import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { Router } from 'express';
 import { requireRole } from '../auth';
-import { ensureVariant, getMedia, originalPath, storeFile, type Variant } from '../services/media';
+import { ensureVariant, getMedia, originalInfo, storeFile, type Variant } from '../services/media';
+import { sendOriginal } from '../services/storage';
 import { badRequest, param } from '../util';
 import { upload } from './upload';
 
@@ -27,14 +27,12 @@ mediaRouter.get('/:id', (req, res) => {
   res.json(getMedia(param(req, 'id')));
 });
 
-mediaRouter.get('/:id/file', (req, res) => {
+mediaRouter.get('/:id/file', async (req, res) => {
   const m = getMedia(param(req, 'id'));
-  const file = originalPath(m.id);
-  if (!fs.existsSync(file)) throw badRequest('File is missing from storage');
+  const o = originalInfo(m.id);
   res.setHeader('Cache-Control', 'private, max-age=3600');
   res.setHeader('Content-Disposition', `inline; filename="${m.originalName.replace(/[^\w.\- ]/g, '_')}"`);
-  res.type(m.mime);
-  res.sendFile(file);
+  await sendOriginal(req, res, o.file, o.location, o.mime);
 });
 
 mediaRouter.get('/:id/:variant', async (req, res) => {

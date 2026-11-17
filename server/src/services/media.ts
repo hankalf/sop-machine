@@ -7,6 +7,7 @@ import { config } from '../config';
 import { db } from '../db';
 import { badRequest, newId, notFound, nowIso } from '../util';
 import { BROWSER_SAFE_CODECS, extractFrame, probe, transcodeToMp4 } from './ffmpeg';
+import { deleteOriginal, localOriginal, objectStorageEnabled, saveOriginal, type StorageLocation } from './storage';
 
 interface MediaRow {
   id: string;
@@ -20,6 +21,7 @@ interface MediaRow {
   duration: number | null;
   parent_id: string | null;
   processing: number;
+  storage: StorageLocation;
   created_by: string | null;
   created_at: string;
 }
@@ -90,9 +92,25 @@ export function mediaMap(ids: Iterable<string>): Map<string, MediaItem> {
   return map;
 }
 
-export function originalPath(id: string): string {
+const fileName = (r: MediaRow) => `${r.id}.${r.ext}`;
+
+/** Where the original is stored, for streaming it to the browser. */
+export function originalInfo(id: string): { file: string; location: StorageLocation; mime: string } {
   const r = row(id);
-  return path.join(config.uploadsDir, `${r.id}.${r.ext}`);
+  return { file: fileName(r), location: r.storage, mime: r.mime };
+}
+
+/** A path on local disk to the original (downloads it from object storage if needed). */
+export async function originalLocalPath(id: string): Promise<string> {
+  const r = row(id);
+  return localOriginal(fileName(r), r.storage);
+}
+
+async function moveToFinalStorage(id: string) {
+  const r = row(id);
+  if (r.storage !== 'local' || !objectStorageEnabled) return;
+  const location = await saveOriginal(fileName(r), path.join(config.uploadsDir, fileName(r)), r.mime);
+  db.prepare('UPDATE media SET storage = ? WHERE id = ?').run(location, id);
 }
 
 const derivedDir = (id: string) => path.join(config.derivedDir, id);
@@ -157,10 +175,9 @@ export async function storeFile(
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(id, kind, finalMime, ext, originalName, size, width, height, duration, parentId, processing ? 1 : 0, userId, nowIso());
 
-  if (kind === 'video') {
-    await ensureVariant(id, 'poster').catch((e) => console.warn('poster failed', id, e));
-    if (processing) enqueueTranscode(id);
-  }
+  if (kind === 'video') await ensureVariant(id, 'poster').catch((e) => console.warn('poster failed', id, e));
+  if (kind === 'video' && processing) enqueueTranscode(id);
+  else await moveToFinalStorage(id).catch((e) => console.error('could not move upload to object storage', id, e));
   return getMedia(id);
 }
 
@@ -230,19 +247,19 @@ export async function ensureVariant(id: string, variant: Variant): Promise<{ fil
 async function buildVariant(id: string, variant: Variant, out: string): Promise<string> {
   const r = row(id);
   await fsp.mkdir(derivedDir(id), { recursive: true });
-  const src = path.join(config.uploadsDir, `${r.id}.${r.ext}`);
   const tmp = `${out}.${process.pid}.tmp`;
+  const original = () => localOriginal(fileName(r), r.storage);
 
   if (variant === 'poster') {
     if (r.kind !== 'video') throw badRequest('Only videos have posters');
     const at = Math.min(1, (r.duration ?? 0) / 2);
-    await extractFrame(src, at, tmp.replace(/\.tmp$/, '.jpg'), 1600);
+    await extractFrame(await original(), at, tmp.replace(/\.tmp$/, '.jpg'), 1600);
     await fsp.rename(tmp.replace(/\.tmp$/, '.jpg'), out);
     return out;
   }
 
   // Images are generated from the original (or from the poster for videos).
-  const source = r.kind === 'video' ? (await ensureVariant(id, 'poster')).file : src;
+  const source = r.kind === 'video' ? (await ensureVariant(id, 'poster')).file : await original();
   let img = sharp(source, { animated: false }).rotate();
   if (variant === 'thumb') {
     img = img.resize({ width: 480, height: 480, fit: 'inside', withoutEnlargement: true }).webp({ quality: 78 });
@@ -268,22 +285,23 @@ function enqueueTranscode(id: string) {
 
 async function transcode(id: string) {
   const r = row(id);
-  const src = path.join(config.uploadsDir, `${r.id}.${r.ext}`);
+  const src = await localOriginal(fileName(r), r.storage);
   const out = path.join(config.tmpDir, `${id}.mp4`);
   try {
     await transcodeToMp4(src, out);
     const dest = path.join(config.uploadsDir, `${id}.mp4`);
     await moveFile(out, dest);
-    if (dest !== src) await fsp.rm(src, { force: true });
+    if (dest !== src) await deleteOriginal(fileName(r), r.storage);
     const p = await probe(dest);
     const size = (await fsp.stat(dest)).size;
-    db.prepare('UPDATE media SET ext = ?, mime = ?, size = ?, width = ?, height = ?, duration = ?, processing = 0 WHERE id = ?').run(
-      'mp4', 'video/mp4', size, p.width, p.height, p.duration, id,
-    );
+    db.prepare(
+      "UPDATE media SET ext = 'mp4', mime = 'video/mp4', size = ?, width = ?, height = ?, duration = ?, processing = 0, storage = 'local' WHERE id = ?",
+    ).run(size, p.width, p.height, p.duration, id);
   } catch (err) {
     console.error(`Could not convert video ${id}; keeping the original`, err);
     db.prepare('UPDATE media SET processing = 0 WHERE id = ?').run(id);
   }
+  await moveToFinalStorage(id).catch((e) => console.error('could not move video to object storage', id, e));
 }
 
 /** Restart video conversions that were interrupted by a server restart. */
@@ -295,9 +313,39 @@ export function resumeProcessing() {
 export async function deleteMediaFiles(id: string) {
   const r = db.prepare('SELECT * FROM media WHERE id = ?').get(id) as MediaRow | undefined;
   if (!r) return;
-  await fsp.rm(path.join(config.uploadsDir, `${r.id}.${r.ext}`), { force: true });
+  await deleteOriginal(fileName(r), r.storage);
   await fsp.rm(derivedDir(id), { recursive: true, force: true });
   db.prepare('DELETE FROM media WHERE id = ?').run(id);
 }
 
 export const ACCEPTED_UPLOADS = [...Object.keys(IMAGE_TYPES), ...Object.keys(VIDEO_TYPES)];
+
+/** Upload every original still on the volume to the bucket (Admin → Storage). */
+export async function migrateToObjectStorage(onProgress: (done: number, total: number) => void): Promise<{ moved: number; failed: number }> {
+  if (!objectStorageEnabled) throw badRequest('Object storage is not configured');
+  const rows = db.prepare("SELECT * FROM media WHERE storage = 'local' AND processing = 0").all() as MediaRow[];
+  let moved = 0;
+  let failed = 0;
+  for (const [i, r] of rows.entries()) {
+    try {
+      if (fs.existsSync(path.join(config.uploadsDir, fileName(r)))) {
+        await moveToFinalStorage(r.id);
+        moved++;
+      }
+    } catch (err) {
+      failed++;
+      console.error('migration failed for', r.id, err);
+    }
+    onProgress(i + 1, rows.length);
+  }
+  return { moved, failed };
+}
+
+export function storageCounts(): { local: number; object: number } {
+  const rows = db.prepare('SELECT storage, COUNT(*) AS n FROM media GROUP BY storage').all() as { storage: string; n: number }[];
+  return { local: rows.find((r) => r.storage === 'local')?.n ?? 0, object: rows.find((r) => r.storage === 's3')?.n ?? 0 };
+}
+
+export function allMediaFiles(): { file: string; location: StorageLocation }[] {
+  return (db.prepare('SELECT * FROM media').all() as MediaRow[]).map((r) => ({ file: fileName(r), location: r.storage }));
+}

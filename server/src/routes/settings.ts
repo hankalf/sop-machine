@@ -10,9 +10,16 @@ import { config } from '../config';
 import { db } from '../db';
 import { pdfEngineStatus } from '../render/pdf';
 import { isAiConfigured } from '../services/ai';
-import { storeBuffer, storeFile } from '../services/media';
+import { emailConfigured, emailFrom } from '../services/mailer';
+import { allMediaFiles, storageCounts, storeBuffer, storeFile } from '../services/media';
+import { bucketName, objectStorageEnabled, readOriginal } from '../services/storage';
+import { transcriptionModel } from '../services/transcribe';
 import { getSettings, updateSettings } from '../services/settings';
-import { badRequest } from '../util';
+import { createJob } from '../services/generator';
+import { listNotifications, sendTestEmail } from '../services/notifications';
+import { checkBucket } from '../services/storage';
+import { badRequest, parseBody } from '../util';
+import { z } from 'zod';
 import { upload } from './upload';
 
 export const settingsRouter = Router();
@@ -51,8 +58,29 @@ settingsRouter.delete('/logo', requireRole('admin'), (_req, res) => {
   res.json(updateSettings({ branding: { logoMediaId: null } }));
 });
 
+settingsRouter.post('/test-email', requireRole('admin'), async (req, res) => {
+  const body = parseBody(z.object({ to: z.email() }), req);
+  await sendTestEmail(body.to).catch((err) => {
+    throw badRequest((err as Error).message);
+  });
+  res.json({ ok: true });
+});
+
+settingsRouter.get('/notifications', requireRole('admin'), (_req, res) => {
+  res.json(listNotifications());
+});
+
 export const systemRouter = Router();
 systemRouter.use(requireRole('admin'));
+
+systemRouter.post('/storage/migrate', (req, res) => {
+  if (!objectStorageEnabled) throw badRequest('Object storage is not configured');
+  res.status(201).json(createJob('storage', 'Move files to object storage', {}, req.user!));
+});
+
+systemRouter.get('/storage/check', async (_req, res) => {
+  res.json(await checkBucket());
+});
 
 async function dirSize(dir: string): Promise<number> {
   let total = 0;
@@ -88,6 +116,9 @@ systemRouter.get('/', async (_req, res) => {
     counts: { sops: count('sops'), media: count('media'), users: count('users'), templates: count('templates') },
     versions: { app: process.env.npm_package_version ?? '1.0.0', node: process.version },
     pdfEngine: await pdfEngineStatus(),
+    storage: { driver: objectStorageEnabled ? 's3' : 'local', bucket: bucketName, localFiles: storageCounts().local, objectFiles: storageCounts().object },
+    email: { configured: emailConfigured, from: emailFrom },
+    transcription: { configured: !!transcriptionModel, model: transcriptionModel },
   };
   res.json(info);
 });
@@ -104,6 +135,12 @@ systemRouter.get('/backup', async (_req, res) => {
   res.on('close', () => void fsp.rm(snapshot, { force: true }));
   zip.pipe(res);
   zip.file(snapshot, { name: 'sop-machine.db' });
-  zip.directory(config.uploadsDir, 'uploads');
+  for (const m of allMediaFiles()) {
+    try {
+      zip.append(await readOriginal(m.file, m.location), { name: `uploads/${m.file}` });
+    } catch (err) {
+      console.warn('backup: could not read', m.file, (err as Error).message);
+    }
+  }
   await zip.finalize();
 });

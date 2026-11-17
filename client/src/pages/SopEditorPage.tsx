@@ -9,7 +9,9 @@ import { ListEditor, MarkdownField } from '../components/editor-fields';
 import { LivePreview } from '../components/LivePreview';
 import { StatusBadge } from '../components/status';
 import { MediaGrid, StepsEditor, useUploader } from '../components/StepsEditor';
-import { Button, Card, ErrorText, Field, Input, PageLoader, Select, cx } from '../components/ui';
+import { Button, Card, ErrorText, Field, IconButton, Input, PageLoader, Segmented, Select, Toggle, cx } from '../components/ui';
+import { ListChecks, Plus, Trash2 } from 'lucide-react';
+import type { ChecklistConfig } from '@shared/types';
 import { ImagePlus } from 'lucide-react';
 import { useDebounced, useUnsavedWarning } from '../hooks';
 
@@ -22,6 +24,7 @@ export default function SopEditorPage() {
   const loaded = useQuery({ queryKey: ['sop', id], queryFn: () => api.sops.get(id), refetchOnMount: 'always' });
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.categories.list });
   const templates = useQuery({ queryKey: ['templates'], queryFn: api.templates.list });
+  const directory = useQuery({ queryKey: ['directory'], queryFn: api.directory });
 
   const [doc, setDoc] = useState<Sop | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('saved');
@@ -85,6 +88,7 @@ export default function SopEditorPage() {
         templateId: current.templateId,
         owner: current.owner,
         approver: current.approver,
+        ownerUserId: current.ownerUserId,
         reviewDate: current.reviewDate,
         tags: current.tags,
         content: current.content,
@@ -256,6 +260,16 @@ export default function SopEditorPage() {
                 <Field label="Approver">
                   <Input value={doc.approver} onChange={(e) => patch((d) => ({ ...d, approver: e.target.value }))} placeholder="Set on approval if empty" />
                 </Field>
+                <Field label="Reminders go to" hint="Gets the email when this SOP is due for review or is approved.">
+                  <Select value={doc.ownerUserId ?? ''} onChange={(e) => patch((d) => ({ ...d, ownerUserId: e.target.value || null }))}>
+                    <option value="">Administrators</option>
+                    {directory.data?.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
               </div>
             </Card>
 
@@ -300,6 +314,8 @@ export default function SopEditorPage() {
               />
             </section>
 
+            <ChecklistCard value={c.checklist} onChange={(checklist) => patchContent((x) => ({ ...x, checklist }))} />
+
             <Card title="Notes & references">
               <MarkdownField value={c.notes} onChange={(v) => patchContent((x) => ({ ...x, notes: v }))} placeholder="Related SOPs, forms, definitions…" minRows={2} />
             </Card>
@@ -343,4 +359,51 @@ function SaveIndicator({ state }: { state: SaveState }) {
     error: { icon: <CloudOff className="size-3.5" />, text: 'Not saved', cls: 'text-red-600' },
   }[state];
   return <span className={cx('hidden items-center gap-1 text-xs font-medium sm:inline-flex', map.cls)}>{map.icon}{map.text}</span>;
+}
+
+function ChecklistCard({ value, onChange }: { value: ChecklistConfig; onChange: (c: ChecklistConfig) => void }) {
+  const set = (p: Partial<ChecklistConfig>) => onChange({ ...value, ...p });
+  return (
+    <Card
+      title={<span className="flex items-center gap-1.5"><ListChecks className="size-4" /> Checklist mode</span>}
+      description="Let people fill this SOP in as a checklist on a phone or tablet. Each completed run is saved as a record."
+      actions={<Toggle checked={value.enabled} onChange={(enabled) => set({ enabled })} />}
+      bodyClassName={value.enabled ? 'space-y-4' : 'hidden'}
+    >
+      <Field label="Each step is answered with">
+        <Segmented value={value.style} onChange={(style) => set({ style })} options={[{ value: 'passfail', label: 'Pass / Fail / N/A (inspections)' }, { value: 'check', label: 'Done / N/A (task lists)' }]} />
+      </Field>
+      <div>
+        <div className="mb-1.5 text-xs font-semibold tracking-wide text-slate-600">Details to record at the start</div>
+        <div className="space-y-2">
+          {value.fields.map((f, i) => (
+            <div key={f.id} className="flex items-center gap-2">
+              <Input value={f.label} onChange={(e) => set({ fields: value.fields.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)) })} placeholder="e.g. Trailer number" />
+              <label className="flex items-center gap-1.5 text-xs whitespace-nowrap text-slate-600">
+                <input type="checkbox" checked={f.required} onChange={(e) => set({ fields: value.fields.map((x, j) => (j === i ? { ...x, required: e.target.checked } : x)) })} className="size-4 accent-[var(--brand)]" />
+                Required
+              </label>
+              <IconButton label="Remove field" className="hover:text-red-600" onClick={() => set({ fields: value.fields.filter((_, j) => j !== i) })}>
+                <Trash2 className="size-4" />
+              </IconButton>
+            </div>
+          ))}
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => set({ fields: [...value.fields, { id: `f${Date.now().toString(36)}`, label: '', required: false }] })} className="inline-flex h-8 items-center gap-1 rounded-md bg-slate-100 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
+              <Plus className="size-3.5" /> Add field
+            </button>
+            {['Trailer #', 'Dock door', 'Seal #', 'Carrier', 'Equipment ID', 'PO #']
+              .filter((l) => !value.fields.some((f) => f.label === l))
+              .map((l) => (
+                <button key={l} type="button" onClick={() => set({ fields: [...value.fields, { id: `f${Date.now().toString(36)}${l.length}`, label: l, required: true }] })} className="rounded-full border border-dashed border-slate-300 px-2.5 py-0.5 text-xs text-slate-600 hover:border-brand hover:text-brand">
+                  + {l}
+                </button>
+              ))}
+          </div>
+        </div>
+      </div>
+      <Toggle checked={value.requireNoteOnFail} onChange={(requireNoteOnFail) => set({ requireNoteOnFail })} label="Require a note when a step fails" description="Photos can always be added to any step." />
+      <Toggle checked={value.requireSignature} onChange={(requireSignature) => set({ requireSignature })} label="Require a typed signature to finish" />
+    </Card>
+  );
 }

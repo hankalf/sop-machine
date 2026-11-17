@@ -15,6 +15,7 @@ interface UserRow {
   email: string;
   name: string;
   role: Role;
+  language: string;
   password_hash: string;
   disabled: number;
   created_at: string;
@@ -45,6 +46,7 @@ export function toUser(row: UserRow): User {
     email: row.email,
     name: row.name,
     role: row.role,
+    language: row.language ?? 'en',
     disabled: !!row.disabled,
     createdAt: row.created_at,
     lastLoginAt: row.last_login_at,

@@ -1,4 +1,4 @@
-import { CALLOUT_META, FONT_OPTIONS, STATUS_LABELS, fillTokens } from '../../../shared/defaults';
+import { CALLOUT_META, DOC_STRINGS, FONT_OPTIONS, STATUS_LABELS, fillTokens, type DocStringKey } from '../../../shared/defaults';
 import type { CalloutType, FontKey, MediaItem, SectionKey, Step, StepMedia, TemplateDesign } from '../../../shared/types';
 import { escapeHtml as e, formatDate, formatDuration } from '../util';
 import { fontFaceCss, fontWeights } from './assets';
@@ -66,7 +66,7 @@ function tokens(ctx: RenderContext): Record<string, string> {
   const s = ctx.sop;
   return {
     company: ctx.settings.branding.companyName,
-    title: s.title,
+    title: ctx.lang.mode === 'tr' ? ctx.lang.t?.content.title || s.title : s.title,
     number: s.number,
     version: s.version,
     status: STATUS_LABELS[s.status] ?? s.status,
@@ -350,7 +350,69 @@ table.data tr:nth-child(even) td { background: #f9fafb; }
 table.sign td { height: 26pt; }
 .attachments { display: grid; grid-template-columns: repeat(auto-fill, minmax(2.6in, 1fr)); gap: 12pt; }
 .muted { color: var(--muted); }
+
+/* ---- Bilingual ---- */
+.bi { font-weight: 500; opacity: .8; }
+.bi-title { display: block; font-size: .8em; font-weight: 600; font-style: italic; opacity: .75; margin-top: 1pt; }
+.bi-block { margin-top: 3pt; padding-left: 7pt; border-left: 2pt solid var(--accent); color: color-mix(in srgb, var(--text) 78%, var(--primary)); font-style: italic; }
+.bi-block p { margin-bottom: .35em; }
+.bi-line { display: block; font-style: italic; opacity: .8; font-size: .95em; }
+.h-band h2.section-title .bi-title { color: #fff; }
+.cover-full .bi-title, .cover-full .bi { color: #fff; }
+[dir="rtl"] .bi-block { padding-left: 0; padding-right: 7pt; border-left: none; border-right: 2pt solid var(--accent); }
 `;
+}
+
+// ---------------------------------------------------------------------------
+// Language helpers: English, translated, or bilingual (English with translation under it)
+// ---------------------------------------------------------------------------
+
+const langAttr = (ctx: RenderContext) => `lang="${e(ctx.lang.code)}"${ctx.lang.rtl ? ' dir="rtl"' : ''}`;
+
+/** Plain text in the current language mode (for tokens and attributes). */
+function txt(ctx: RenderContext, en: string, tr: string | undefined): string {
+  if (ctx.lang.mode === 'tr') return tr?.trim() ? tr : en;
+  if (ctx.lang.mode === 'bi' && tr?.trim() && tr !== en) return `${en} / ${tr}`;
+  return en;
+}
+
+/** Escaped short label; bilingual shows "English / Translation". */
+function lbl(ctx: RenderContext, en: string, tr: string | undefined): string {
+  if (ctx.lang.mode === 'tr') return e(tr?.trim() ? tr : en);
+  if (ctx.lang.mode === 'bi' && tr?.trim() && tr !== en) return `${e(en)}<span class="bi" ${langAttr(ctx)}> / ${e(tr)}</span>`;
+  return e(en);
+}
+
+const docStr = (ctx: RenderContext, key: DocStringKey) => lbl(ctx, DOC_STRINGS[key], ctx.lang.t?.strings[key]);
+const docTxt = (ctx: RenderContext, key: DocStringKey) => txt(ctx, DOC_STRINGS[key], ctx.lang.t?.strings[key]);
+
+/** Markdown block; bilingual puts the translation underneath in a marked block. */
+function block(ctx: RenderContext, en: string, tr: string | undefined): string {
+  if (ctx.lang.mode === 'tr') return mdToHtml(tr?.trim() ? tr : en);
+  if (ctx.lang.mode === 'bi' && tr?.trim()) return `${mdToHtml(en)}<div class="bi-block" ${langAttr(ctx)}>${mdToHtml(tr)}</div>`;
+  return mdToHtml(en);
+}
+
+/** Inline markdown (list items, captions). */
+function inline(ctx: RenderContext, en: string, tr: string | undefined): string {
+  if (ctx.lang.mode === 'tr') return mdInline(tr?.trim() ? tr : en);
+  if (ctx.lang.mode === 'bi' && tr?.trim()) return `${mdInline(en)}<span class="bi-line" ${langAttr(ctx)}>${mdInline(tr)}</span>`;
+  return mdInline(en);
+}
+
+/** Headings: bilingual adds a smaller translated line. */
+function heading(ctx: RenderContext, en: string, tr: string | undefined): string {
+  if (ctx.lang.mode === 'tr') return e(tr?.trim() ? tr : en);
+  if (ctx.lang.mode === 'bi' && tr?.trim() && tr !== en) return `${e(en)}<span class="bi-title" ${langAttr(ctx)}>${e(tr)}</span>`;
+  return e(en);
+}
+
+const trContent = (ctx: RenderContext) => ctx.lang.t?.content ?? null;
+const trStep = (ctx: RenderContext, id: string) => trContent(ctx)?.steps.find((s) => s.id === id);
+
+function statusLabel(ctx: RenderContext): string {
+  const key = ({ draft: 'statusDraft', review: 'statusReview', approved: 'statusApproved', archived: 'statusArchived' } as const)[ctx.sop.status];
+  return docTxt(ctx, key);
 }
 
 // ---------------------------------------------------------------------------
@@ -362,39 +424,40 @@ function logoImg(ctx: RenderContext, cls = '') {
   return `<img class="${cls}" src="/api/public/logo?v=${e(ctx.settings.branding.logoMediaId)}" alt="${e(ctx.settings.branding.companyName)}">`;
 }
 
+const mediaSrc = (ctx: RenderContext, id: string, variant: string) => `${ctx.mediaBase}/${id}/${variant}`;
+
 function imgTag(m: MediaItem, ctx: RenderContext, alt: string) {
   const variant = ctx.settings.export.imageQuality === 'high' && ctx.purpose === 'pdf' ? 'display-hq' : 'display';
   const dims = m.width && m.height ? ` width="${m.width}" height="${m.height}"` : '';
-  return `<img class="media" src="/api/media/${m.id}/${variant}"${dims} alt="${e(alt)}" loading="${ctx.mode === 'web' ? 'lazy' : 'eager'}">`;
+  return `<img class="media" src="${mediaSrc(ctx, m.id, variant)}"${dims} alt="${e(alt)}" loading="${ctx.mode === 'web' ? 'lazy' : 'eager'}">`;
 }
 
-function renderFigure(item: StepMedia, ctx: RenderContext): string {
+function renderFigure(item: StepMedia, ctx: RenderContext, trCaption?: string): string {
   const m = ctx.media.get(item.mediaId);
   if (!m) return '';
-  const caption = item.caption ? `<figcaption>${mdInline(item.caption)}</figcaption>` : '';
+  const caption = item.caption ? `<figcaption>${inline(ctx, item.caption, trCaption)}</figcaption>` : '';
   if (m.kind === 'image') {
     return `<figure>${imgTag(m, ctx, item.caption)}${caption}</figure>`;
   }
   // Video
   if (ctx.mode === 'web') {
     const dims = m.width && m.height ? ` width="${m.width}" height="${m.height}"` : '';
-    return `<figure id="media-${m.id}"><video controls preload="metadata" playsinline poster="/api/media/${m.id}/poster"${dims}><source src="/api/media/${m.id}/file" type="${e(m.mime)}"></video>${caption}</figure>`;
+    return `<figure id="media-${m.id}"><video controls preload="metadata" playsinline poster="${mediaSrc(ctx, m.id, 'poster')}"${dims}><source src="${mediaSrc(ctx, m.id, 'file')}" type="${e(m.mime)}"></video>${caption}</figure>`;
   }
   const handling = ctx.settings.export.videoHandling;
   if (handling === 'omit') return '';
   const qr = ctx.videoQrs.get(m.id);
   const dur = formatDuration(m.duration);
-  return `<figure><div class="video-card"><div class="poster"><img src="/api/media/${m.id}/poster" alt="Video"><span class="play">${ICONS.play}</span></div>${
+  return `<figure><div class="video-card"><div class="poster"><img src="${mediaSrc(ctx, m.id, 'poster')}" alt="Video"><span class="play">${ICONS.play}</span></div>${
     handling === 'qr' && qr
-      ? `<div class="video-qr"><img src="${qr}" alt="QR code"><div><strong>Scan to watch the video</strong>${dur ? `<br>Length ${dur}` : ''}</div></div>`
-      : `<div class="video-qr"><div><strong>Video${dur ? ` (${dur})` : ''}</strong><br>Open the digital SOP to watch.</div></div>`
+      ? `<div class="video-qr"><img src="${qr}" alt="QR code"><div><strong>${docStr(ctx, 'scanVideo')}</strong>${dur ? `<br>${docStr(ctx, 'length')} ${dur}` : ''}</div></div>`
+      : `<div class="video-qr"><div><strong>${docStr(ctx, 'video')}${dur ? ` (${dur})` : ''}</strong><br>${docStr(ctx, 'openDigital')}</div></div>`
   }</div>${caption}</figure>`;
 }
 
-function renderCallout(type: CalloutType, text: string) {
+function renderCallout(ctx: RenderContext, type: CalloutType, text: string, tr: string | undefined) {
   if (type === 'none' || !text.trim()) return '';
-  const meta = CALLOUT_META[type];
-  return `<div class="callout callout-${type}">${ICONS[type]}<div><div class="c-label">${meta.label}</div><div class="c-text">${mdToHtml(text)}</div></div></div>`;
+  return `<div class="callout callout-${type}">${ICONS[type]}<div><div class="c-label">${docStr(ctx, type)}</div><div class="c-text">${block(ctx, text, tr)}</div></div></div>`;
 }
 
 /** Steps as printable blocks. A phase heading is glued to the step after it so it never ends a page. */
@@ -403,17 +466,19 @@ function stepBlocks(ctx: RenderContext): string[] {
   const blocks: string[] = [];
   let pendingPhase = '';
   for (const step of ctx.sop.content.steps) {
+    const t = trStep(ctx, step.id);
     if (step.kind === 'section') {
-      pendingPhase += `<h3 class="phase" id="${stepId(step)}">${e(step.title || 'Section')}</h3>`;
+      pendingPhase += `<h3 class="phase" id="${stepId(step)}">${heading(ctx, step.title || 'Section', t?.title)}</h3>`;
       continue;
     }
     n += 1;
-    const figures = step.media.map((m) => renderFigure(m, ctx)).filter(Boolean);
+    const figures = step.media.map((m, i) => renderFigure(m, ctx, t?.captions[i])).filter(Boolean);
     const mediaCls = figures.length === 1 ? 'single' : figures.length > 2 ? 'many' : '';
+    const stepWord = ctx.lang.mode === 'tr' ? docTxt(ctx, 'step') : DOC_STRINGS.step;
     const html = `<div class="step" id="${stepId(step)}">
-  <div class="step-head"><span class="step-num">${ctx.design.style.stepStyle === 'label' ? `Step ${n}` : n}</span><h3 class="step-title">${e(step.title || `Step ${n}`)}</h3></div>
+  <div class="step-head"><span class="step-num">${ctx.design.style.stepStyle === 'label' ? `${e(stepWord)} ${n}` : n}</span><h3 class="step-title">${heading(ctx, step.title || `Step ${n}`, t?.title)}</h3></div>
   <div class="step-body${figures.length ? ' with-media' : ''}">
-    <div class="step-text">${mdToHtml(step.body)}${renderCallout(step.callout.type, step.callout.text)}</div>
+    <div class="step-text">${block(ctx, step.body, t?.body)}${renderCallout(ctx, step.callout.type, step.callout.text, t?.callout)}</div>
     ${figures.length ? `<div class="step-media ${mediaCls}">${figures.join('')}</div>` : ''}
   </div>
 </div>`;
@@ -421,7 +486,7 @@ function stepBlocks(ctx: RenderContext): string[] {
     pendingPhase = '';
   }
   if (pendingPhase) blocks.push(pendingPhase);
-  if (!blocks.length) blocks.push('<p class="muted">No steps yet.</p>');
+  if (!blocks.length) blocks.push(`<p class="muted">${docStr(ctx, 'noSteps')}</p>`);
   return blocks;
 }
 
@@ -431,83 +496,75 @@ const KEEP_SECTIONS = new Set<SectionKey>(['docInfo', 'safety', 'tools', 'approv
 function infoRows(ctx: RenderContext): [string, string][] {
   const s = ctx.sop;
   return [
-    ['Document No.', s.number],
-    ['Version', s.version],
-    ['Status', STATUS_LABELS[s.status] ?? s.status],
-    ['Category', ctx.category?.name ?? '—'],
-    ['Effective date', formatDate(s.effectiveDate) || 'On approval'],
-    ['Next review', formatDate(s.reviewDate) || '—'],
-    ['Owner', s.owner || '—'],
-    ['Approver', s.approver || '—'],
+    [docStr(ctx, 'docNo'), e(s.number)],
+    [docStr(ctx, 'version'), e(s.version)],
+    [docStr(ctx, 'status'), e(statusLabel(ctx))],
+    [docStr(ctx, 'category'), e(ctx.category?.name ?? '—')],
+    [docStr(ctx, 'effectiveDate'), e(formatDate(s.effectiveDate) || docTxt(ctx, 'onApproval'))],
+    [docStr(ctx, 'nextReview'), e(formatDate(s.reviewDate) || '—')],
+    [docStr(ctx, 'owner'), e(s.owner || '—')],
+    [docStr(ctx, 'approver'), e(s.approver || '—')],
   ];
 }
 
+const sectionLabel = (ctx: RenderContext, key: SectionKey, en: string) => heading(ctx, en, ctx.lang.t?.strings[`section.${key}`]);
+
 function renderSection(key: SectionKey, label: string, ctx: RenderContext): string {
   const c = ctx.sop.content;
-  const title = `<h2 class="section-title">${e(label)}</h2>`;
+  const t = trContent(ctx);
+  const title = `<h2 class="section-title">${sectionLabel(ctx, key, label)}</h2>`;
   const wrap = (body: string, keep = KEEP_SECTIONS.has(key) || body.length < 1500) =>
     `<section class="section sec-${key}${keep ? ' keep' : ''}" id="${sectionId(key)}">${title}<div class="section-body">${body}</div></section>`;
   switch (key) {
     case 'docInfo':
-      return wrap(
-        `<div class="info-grid">${infoRows(ctx)
-          .map(([k, v]) => `<div class="k">${e(k)}</div><div>${e(v)}</div>`)
-          .join('')}</div>`,
-      );
+      return wrap(`<div class="info-grid">${infoRows(ctx).map(([k, v]) => `<div class="k">${k}</div><div>${v}</div>`).join('')}</div>`);
     case 'toc': {
       const items: string[] = [];
       for (const s of visibleSections(ctx)) {
         if (s.key === 'toc' || s.key === 'docInfo') continue;
-        items.push(`<li><a href="#${sectionId(s.key)}"><span>${e(s.label)}</span><span class="dots"></span></a></li>`);
+        items.push(`<li><a href="#${sectionId(s.key)}"><span>${e(txt(ctx, s.label, ctx.lang.t?.strings[`section.${s.key}`]))}</span><span class="dots"></span></a></li>`);
         if (s.key === 'procedure') {
           let n = 0;
           for (const st of c.steps) {
-            const label = st.kind === 'section' ? st.title : `${++n}. ${st.title || `Step ${n}`}`;
-            items.push(`<li class="sub"><a href="#${stepId(st)}"><span>${e(label)}</span><span class="dots"></span></a></li>`);
+            const stTitle = ctx.lang.mode === 'tr' ? trStep(ctx, st.id)?.title || st.title : st.title;
+            const lineLabel = st.kind === 'section' ? stTitle : `${++n}. ${stTitle || `Step ${n}`}`;
+            items.push(`<li class="sub"><a href="#${stepId(st)}"><span>${e(lineLabel)}</span><span class="dots"></span></a></li>`);
           }
         }
       }
       return wrap(`<ol class="toc">${items.join('')}</ol>`);
     }
     case 'purpose':
-      return wrap(mdToHtml(c.purpose));
     case 'scope':
-      return wrap(mdToHtml(c.scope));
     case 'responsibilities':
-      return wrap(mdToHtml(c.responsibilities));
     case 'notes':
-      return wrap(mdToHtml(c.notes));
+      return wrap(block(ctx, c[key], t?.[key]));
     case 'safety':
-      return wrap(
-        `<div class="safety-box"><ul class="list-grid">${c.safety.map((x) => `<li>${ICONS.shield}<span>${mdInline(x)}</span></li>`).join('')}</ul></div>`,
-      );
+      return wrap(`<div class="safety-box"><ul class="list-grid">${c.safety.map((x, i) => `<li>${ICONS.shield}<span>${inline(ctx, x, t?.safety[i])}</span></li>`).join('')}</ul></div>`);
     case 'tools':
-      return wrap(`<ul class="list-grid tools">${c.tools.map((x) => `<li>${ICONS.tool}<span>${mdInline(x)}</span></li>`).join('')}</ul>`);
+      return wrap(`<ul class="list-grid tools">${c.tools.map((x, i) => `<li>${ICONS.tool}<span>${inline(ctx, x, t?.tools[i])}</span></li>`).join('')}</ul>`);
     case 'procedure': {
       const [first, ...rest] = stepBlocks(ctx);
       return `<section class="section sec-procedure" id="${sectionId(key)}"><div class="keep">${title}${first}</div>${rest.join('\n')}</section>`;
     }
     case 'attachments':
-      return wrap(`<div class="attachments">${c.attachments.map((a) => renderFigure(a, ctx)).join('')}</div>`);
+      return wrap(`<div class="attachments">${c.attachments.map((a, i) => renderFigure(a, ctx, t?.attachments[i])).join('')}</div>`);
     case 'revisions': {
       const rows = ctx.revisions.length
-        ? ctx.revisions
-            .map(
-              (r) =>
-                `<tr><td>${e(r.version)}</td><td>${e(formatDate(r.createdAt))}</td><td>${e(r.summary)}</td><td>${e(r.createdByName ?? '')}</td></tr>`,
-            )
-            .join('')
-        : `<tr><td>${e(ctx.sop.version)}</td><td>—</td><td>Initial release (pending approval)</td><td></td></tr>`;
-      return wrap(`<table class="data"><thead><tr><th style="width:12%">Version</th><th style="width:18%">Date</th><th>Description of change</th><th style="width:22%">Approved by</th></tr></thead><tbody>${rows}</tbody></table>`);
+        ? ctx.revisions.map((r) => `<tr><td>${e(r.version)}</td><td>${e(formatDate(r.createdAt))}</td><td>${e(r.summary)}</td><td>${e(r.createdByName ?? '')}</td></tr>`).join('')
+        : `<tr><td>${e(ctx.sop.version)}</td><td>—</td><td>${docStr(ctx, 'initialRelease')}</td><td></td></tr>`;
+      return wrap(
+        `<table class="data"><thead><tr><th style="width:12%">${docStr(ctx, 'version')}</th><th style="width:18%">${docStr(ctx, 'revDate')}</th><th>${docStr(ctx, 'revChange')}</th><th style="width:22%">${docStr(ctx, 'revApprovedBy')}</th></tr></thead><tbody>${rows}</tbody></table>`,
+      );
     }
     case 'approvals': {
       const rows: [string, string][] = [
-        ['Prepared by', ctx.sop.owner],
-        ['Reviewed by', ''],
-        ['Approved by', ctx.sop.approver],
+        [docStr(ctx, 'preparedBy'), ctx.sop.owner],
+        [docStr(ctx, 'reviewedBy'), ''],
+        [docStr(ctx, 'approvedBy'), ctx.sop.approver],
       ];
       return wrap(
-        `<table class="data sign"><thead><tr><th style="width:20%">Role</th><th style="width:30%">Name</th><th>Signature</th><th style="width:18%">Date</th></tr></thead><tbody>${rows
+        `<table class="data sign"><thead><tr><th style="width:20%">${docStr(ctx, 'role')}</th><th style="width:30%">${docStr(ctx, 'name')}</th><th>${docStr(ctx, 'signature')}</th><th style="width:18%">${docStr(ctx, 'date')}</th></tr></thead><tbody>${rows
           .map(([role, name]) => `<tr><td>${role}</td><td>${e(name)}</td><td></td><td></td></tr>`)
           .join('')}</tbody></table>`,
       );
@@ -518,25 +575,28 @@ function renderSection(key: SectionKey, label: string, ctx: RenderContext): stri
 function renderCover(ctx: RenderContext): string {
   const d = ctx.design;
   const s = ctx.sop;
-  const cat = ctx.category
-    ? `<div class="cover-cat"><i style="background:${e(ctx.category.color)}"></i>${e(ctx.category.name)}</div>`
-    : '';
-  const meta = `<table class="cover-meta">${[
-    ['Version', s.version],
-    ['Status', STATUS_LABELS[s.status] ?? s.status],
-    ['Effective date', formatDate(s.effectiveDate) || 'On approval'],
-    ['Next review', formatDate(s.reviewDate) || '—'],
-    ['Owner', s.owner || '—'],
-    ['Approver', s.approver || '—'],
-  ]
-    .map(([k, v]) => `<tr><td class="k">${e(k)}</td><td>${e(v)}</td></tr>`)
+  const tTitle = trContent(ctx)?.title;
+  const cat = ctx.category ? `<div class="cover-cat"><i style="background:${e(ctx.category.color)}"></i>${e(ctx.category.name)}</div>` : '';
+  const meta = `<table class="cover-meta">${(
+    [
+      ['version', e(s.version)],
+      ['status', e(statusLabel(ctx))],
+      ['effectiveDate', e(formatDate(s.effectiveDate) || docTxt(ctx, 'onApproval'))],
+      ['nextReview', e(formatDate(s.reviewDate) || '—')],
+      ['owner', e(s.owner || '—')],
+      ['approver', e(s.approver || '—')],
+    ] as [DocStringKey, string][]
+  )
+    .map(([k, v]) => `<tr><td class="k">${docStr(ctx, k)}</td><td>${v}</td></tr>`)
     .join('')}</table>`;
   const qr = ctx.sopQr
-    ? `<div class="cover-qr"><img src="${ctx.sopQr}" alt="QR code"><div><strong>Scan for the latest version</strong><br>${e(ctx.sopUrl.replace(/^https?:\/\//, ''))}</div></div>`
+    ? `<div class="cover-qr"><img src="${ctx.sopQr}" alt="QR code"><div><strong>${docStr(ctx, 'scanLatest')}</strong><br>${e(ctx.sopUrl.replace(/^https?:\/\//, ''))}</div></div>`
     : '';
   const logo = logoImg(ctx);
   const company = `<div class="cover-company">${e(ctx.settings.branding.companyName)}</div>`;
-  const titleBlock = `<div class="cover-subtitle">${e(d.cover.subtitle)}</div><h1>${e(s.title)}</h1><div class="cover-number">${e(s.number)}</div>${cat}`;
+  const subtitle = lbl(ctx, d.cover.subtitle, ctx.lang.t?.strings['cover.subtitle']);
+  const h1 = heading(ctx, s.title, tTitle);
+  const titleBlock = `<div class="cover-subtitle">${subtitle}</div><h1>${h1}</h1><div class="cover-number">${e(s.number)}</div>${cat}`;
 
   if (d.cover.style === 'band') {
     return `<section class="cover cover-band">
@@ -549,7 +609,7 @@ function renderCover(ctx: RenderContext): string {
   if (d.cover.style === 'centered') {
     return `<section class="cover cover-centered">
   ${logo ? `<div class="cover-logo">${logo}</div>` : ''}${company}
-  <div class="cover-main"><div class="cover-subtitle">${e(d.cover.subtitle)}</div><h1>${e(s.title)}</h1><div class="cover-rule"></div><div class="cover-number">${e(s.number)}</div>${cat}</div>
+  <div class="cover-main"><div class="cover-subtitle">${subtitle}</div><h1>${h1}</h1><div class="cover-rule"></div><div class="cover-number">${e(s.number)}</div>${cat}</div>
   <div class="cover-bottom">${meta}${qr}</div>
 </section>`;
   }
@@ -573,10 +633,10 @@ function renderWebHeader(ctx: RenderContext): string {
               : 'this SOP has not been approved yet.'
         }</div>`
       : '';
-  return `<header class="web-header">${logo}<div><div class="wh-sub">${e(ctx.design.cover.subtitle)}${ctx.category ? ` · ${e(ctx.category.name)}` : ''}</div><h1>${e(s.title)}</h1>
-<div class="wh-meta"><span>${e(s.number)}</span><span>Rev ${e(s.version)}</span><span class="status-pill status-${s.status}">${e(STATUS_LABELS[s.status] ?? s.status)}</span>${
-    s.effectiveDate ? `<span>Effective ${e(formatDate(s.effectiveDate))}</span>` : ''
-  }${s.owner ? `<span>Owner: ${e(s.owner)}</span>` : ''}</div></div></header>${banner}`;
+  return `<header class="web-header">${logo}<div><div class="wh-sub">${lbl(ctx, ctx.design.cover.subtitle, ctx.lang.t?.strings['cover.subtitle'])}${ctx.category ? ` · ${e(ctx.category.name)}` : ''}</div><h1>${heading(ctx, s.title, trContent(ctx)?.title)}</h1>
+<div class="wh-meta"><span>${e(s.number)}</span><span>Rev ${e(s.version)}</span><span class="status-pill status-${s.status}">${e(statusLabel(ctx))}</span>${
+    s.effectiveDate ? `<span>${docStr(ctx, 'effectiveDate')}: ${e(formatDate(s.effectiveDate))}</span>` : ''
+  }${s.owner ? `<span>${docStr(ctx, 'owner')}: ${e(s.owner)}</span>` : ''}</div></div></header>${banner}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -589,6 +649,7 @@ export function renderHtml(ctx: RenderContext): string {
   const paged = ctx.mode === 'paged';
   const bodyClasses = [
     `mode-${ctx.mode}`,
+    `lang-${ctx.lang.mode}`,
     `h-${d.style.headingStyle}`,
     `s-${d.style.stepStyle}`,
     d.steps.layout === 'side-by-side' ? 'layout-side' : 'layout-stacked',
@@ -602,14 +663,15 @@ export function renderHtml(ctx: RenderContext): string {
       .map((w) => `${w} 12px "${fam}"`);
   });
 
+  const strings = ctx.lang.t?.strings ?? {};
+  const footerLeft = txt(ctx, fillTokens(d.footer.left, t), strings['footer.left'] ? fillTokens(strings['footer.left'], t) : undefined);
+  const footerCenter = txt(ctx, fillTokens(d.footer.center, t), strings['footer.center'] ? fillTokens(strings['footer.center'], t) : undefined);
   const runHeader =
     paged && d.header.enabled
       ? `<div class="run-header"><div class="rh">${d.header.showLogo ? logoImg(ctx) : ''}<span class="rh-left">${e(fillTokens(d.header.left, t))}</span><span class="rh-right">${e(fillTokens(d.header.right, t))}</span></div></div>`
       : '';
   const runFooter =
-    paged && d.footer.enabled
-      ? `<div class="run-footer"><div class="rf"><span class="rf-left">${e(fillTokens(d.footer.left, t))}</span><span class="rf-center">${e(fillTokens(d.footer.center, t))}</span></div></div>`
-      : '';
+    paged && d.footer.enabled ? `<div class="run-footer"><div class="rf"><span class="rf-left">${e(footerLeft)}</span><span class="rf-center">${e(footerCenter)}</span></div></div>` : '';
 
   const sections = visibleSections(ctx)
     .map((s) => renderSection(s.key, s.label, ctx))
@@ -620,14 +682,16 @@ export function renderHtml(ctx: RenderContext): string {
         ctx.purpose === 'preview' ? '<script src="/render-assets/paged-preview.js"></script>' : ''
       }<script src="/render-assets/paged.polyfill.js"></script>`
     : '';
+  const docLang = ctx.lang.mode === 'tr' ? ctx.lang.code : 'en';
+  const docDir = ctx.lang.mode === 'tr' && ctx.lang.rtl ? ' dir="rtl"' : '';
 
   return `<!doctype html>
-<html lang="en">
+<html lang="${e(docLang)}"${docDir}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="sop-fonts" content="${e(fontsToLoad.join('|'))}">
-<title>${e(`${ctx.sop.number} ${ctx.sop.title}`)}</title>
+<title>${e(`${ctx.sop.number} ${t.title}`)}</title>
 <style>${buildCss(ctx)}</style>
 ${scripts}
 </head>

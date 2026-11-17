@@ -18,6 +18,14 @@ import { settingsRouter, systemRouter } from './routes/settings';
 import { sopsRouter } from './routes/sops';
 import { templatesRouter } from './routes/templates';
 import { usersRouter } from './routes/users';
+import { opsRouter } from './routes/operations';
+import { publicRouter } from './routes/public';
+import { pruneExports } from './render/binder';
+import { sopEvents } from './services/events';
+import { startNotificationScheduler } from './services/notifications';
+import { contentHash } from './services/translations';
+import { createJob as createGenerationJob } from './services/generator';
+import { getSettings } from './services/settings';
 import { failInterruptedJobs } from './services/generator';
 import { resumeProcessing } from './services/media';
 import { publicBranding } from './services/settings';
@@ -28,6 +36,20 @@ ensureAdmin();
 seedTemplatesAndCategories();
 failInterruptedJobs();
 resumeProcessing();
+startNotificationScheduler();
+void pruneExports();
+setInterval(() => void pruneExports(), 6 * 3600 * 1000);
+
+// Keep translations in step with approved SOPs when the admin wants that.
+sopEvents.onSop('approved', (sop, by) => {
+  const s = getSettings();
+  if (!s.languages.autoTranslate) return;
+  const hash = contentHash(sop);
+  for (const code of s.languages.enabled) {
+    const exists = db.prepare('SELECT 1 FROM translations WHERE sop_id = ? AND language = ? AND source_hash = ?').get(sop.id, code, hash);
+    if (!exists) createGenerationJob('translate', `${code.toUpperCase()}: ${sop.number} ${sop.title}`, { sopId: sop.id, language: code }, by);
+  }
+});
 
 const app = express();
 app.set('trust proxy', 1);
@@ -81,6 +103,7 @@ app.get('/render-assets/{*path}', async (req, res) => {
 });
 
 app.use('/api/auth', authRouter);
+app.use('/api/public', publicRouter);
 
 // ---- Authenticated API ----
 app.use('/api', requireAuth);
@@ -93,6 +116,7 @@ app.use('/api/system', systemRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/generate', generateRouter);
 app.use('/api/jobs', jobsRouter);
+app.use('/api', opsRouter);
 app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 
 // ---- Web client (built by Vite) ----
@@ -108,7 +132,7 @@ if (fs.existsSync(clientDir)) {
 }
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message });
+  if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message, ...((err as { loginRequired?: boolean }).loginRequired ? { loginRequired: true } : {}) });
   if (err instanceof ZodError) return void res.status(400).json({ error: err.issues[0]?.message ?? 'Invalid input' });
   if (err instanceof multer.MulterError) {
     const msg = err.code === 'LIMIT_FILE_SIZE' ? `File is too large (limit ${config.maxUploadMb} MB)` : err.message;

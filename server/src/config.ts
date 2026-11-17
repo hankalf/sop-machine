@@ -43,6 +43,7 @@ export const config = {
   uploadsDir: path.join(dataDir, 'uploads'),
   derivedDir: path.join(dataDir, 'derived'),
   tmpDir: path.join(dataDir, 'tmp'),
+  exportsDir: path.join(dataDir, 'exports'),
   dbPath: path.join(dataDir, 'sop-machine.db'),
   appUrl: appUrl(),
   sessionSecret: process.env.SESSION_SECRET ?? '',
@@ -53,6 +54,6 @@ export const config = {
   anthropicConfigured: Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN),
 };
 
-for (const dir of [config.dataDir, config.uploadsDir, config.derivedDir, config.tmpDir]) {
+for (const dir of [config.dataDir, config.uploadsDir, config.derivedDir, config.tmpDir, config.exportsDir]) {
   fs.mkdirSync(dir, { recursive: true });
 }

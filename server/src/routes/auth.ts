@@ -29,11 +29,17 @@ authRouter.get('/me', requireAuth, (req, res) => {
 
 authRouter.put('/me', requireAuth, (req, res) => {
   const body = parseBody(
-    z.object({ name: z.string().trim().min(1).max(120).optional(), currentPassword: z.string().optional(), newPassword: z.string().min(8).max(200).optional() }),
+    z.object({
+      name: z.string().trim().min(1).max(120).optional(),
+      language: z.string().min(2).max(8).optional(),
+      currentPassword: z.string().optional(),
+      newPassword: z.string().min(8).max(200).optional(),
+    }),
     req,
   );
   const row = getUserRow(req.user!.id)!;
   if (body.name) db.prepare('UPDATE users SET name = ? WHERE id = ?').run(body.name, row.id);
+  if (body.language) db.prepare('UPDATE users SET language = ? WHERE id = ?').run(body.language, row.id);
   if (body.newPassword) {
     if (!body.currentPassword || !bcrypt.compareSync(body.currentPassword, row.password_hash)) throw badRequest('Current password is incorrect');
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(body.newPassword), row.id);

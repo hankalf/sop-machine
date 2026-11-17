@@ -17,12 +17,15 @@ import {
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { Sop, SopStatus } from '@shared/types';
-import { api, downloadFile } from '../api';
+import { api, downloadFile, EN, type LangChoice } from '../api';
+import { FloorCard } from '../components/sop/FloorCard';
+import { SignOffCard } from '../components/sop/SignOffCard';
+import { TranslationsCard } from '../components/sop/TranslationsCard';
 import { useAuth, useCan } from '../auth';
 import { LivePreview } from '../components/LivePreview';
 import { StatusBadge } from '../components/status';
 import { useToast } from '../components/Toast';
-import { Badge, Button, Card, ErrorText, Field, Input, Modal, PageLoader, Segmented, Textarea, timeAgo } from '../components/ui';
+import { Badge, Button, Card, ErrorText, Field, Input, Modal, PageLoader, Segmented, Select, Textarea, timeAgo } from '../components/ui';
 
 export default function SopViewPage() {
   const { id = '' } = useParams();
@@ -37,11 +40,21 @@ export default function SopViewPage() {
   const [exporting, setExporting] = useState<'pdf' | 'docx' | null>(null);
   const [approveOpen, setApproveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [lang, setLang] = useState<LangChoice>(EN);
+  const [langTouched, setLangTouched] = useState(false);
+  const [refresh, setRefresh] = useState(0);
 
   const sop = useQuery({ queryKey: ['sop', id], queryFn: () => api.sops.get(id) });
   const revisions = useQuery({ queryKey: ['revisions', id], queryFn: () => api.sops.revisions(id) });
   const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings.get });
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.categories.list });
+  const languages = useQuery({ queryKey: ['sop-languages', id, sop.data?.updatedAt], queryFn: () => api.sops.languages(id), enabled: !!sop.data });
+
+  // Open in the reader's own language when a translation exists.
+  useEffect(() => {
+    if (langTouched || !user || user.language === 'en') return;
+    if (languages.data?.some((l) => l.code === user.language)) setLang({ code: user.language, bilingual: false });
+  }, [languages.data, user, langTouched]);
 
   const mediaTarget = params.get('media');
   const [scrollTarget, setScrollTarget] = useState<string | null>(null);
@@ -61,7 +74,7 @@ export default function SopViewPage() {
   const exportAs = async (format: 'pdf' | 'docx') => {
     setExporting(format);
     try {
-      await downloadFile(`/api/sops/${id}/export?format=${format}`);
+      await downloadFile(api.sops.exportUrl(id, format, lang));
     } catch (e) {
       toast.error(e);
     } finally {
@@ -135,6 +148,7 @@ export default function SopViewPage() {
                 onClick={() => exportAs(f)}
               >
                 {f === 'pdf' ? 'Export PDF' : 'Export Word'}
+                {lang.code !== 'en' && <span className="rounded bg-black/10 px-1 text-[10px] uppercase">{lang.bilingual ? `en+${lang.code}` : lang.code}</span>}
               </Button>
             ))}
           {isEditor && s.status !== 'archived' && (
@@ -148,7 +162,7 @@ export default function SopViewPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="overflow-hidden rounded-xl shadow-sm ring-1 ring-slate-200">
           <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-2">
-            <div className="w-64">
+            <div className="w-64 shrink-0">
               <Segmented
                 size="sm"
                 value={mode}
@@ -159,12 +173,39 @@ export default function SopViewPage() {
                 ]}
               />
             </div>
-            <span className="hidden text-xs text-slate-500 sm:block">{mode === 'web' ? 'Videos play here. Works on phones and tablets.' : 'Exactly what the PDF will look like.'}</span>
+            {languages.data?.length ? (
+              <Select
+                aria-label="Language"
+                className="h-8 w-52 text-xs"
+                value={`${lang.code}${lang.bilingual ? '+' : ''}`}
+                onChange={(e) => {
+                  setLangTouched(true);
+                  const v = e.target.value;
+                  setLang({ code: v.replace('+', ''), bilingual: v.endsWith('+') });
+                }}
+              >
+                <option value="en">English</option>
+                {languages.data.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.native}
+                  </option>
+                ))}
+                {languages.data.map((l) => (
+                  <option key={`${l.code}+`} value={`${l.code}+`}>
+                    English + {l.native} (bilingual)
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <span className="hidden text-xs text-slate-500 sm:block">{mode === 'web' ? 'Videos play here. Works on phones and tablets.' : 'Exactly what the PDF will look like.'}</span>
+            )}
           </div>
-          <LivePreview src={api.sops.renderUrl(id, mode, s.updatedAt)} paged={mode === 'paged'} className="h-[calc(100vh-220px)] min-h-[520px]" scrollTarget={scrollTarget} />
+          <LivePreview src={api.sops.renderUrl(id, mode, `${s.updatedAt}-${refresh}`, lang)} paged={mode === 'paged'} className="h-[calc(100vh-220px)] min-h-[520px]" scrollTarget={scrollTarget} />
         </div>
 
         <div className="space-y-4">
+          {settings.data?.training.enabled !== false && <SignOffCard sop={s} />}
+          <FloorCard sop={s} language={lang.code} />
           {isEditor && (
             <Card title="Workflow" bodyClassName="space-y-2">
               {s.status === 'draft' && (
@@ -201,6 +242,8 @@ export default function SopViewPage() {
               )}
             </Card>
           )}
+
+          {isEditor && <TranslationsCard sop={s} onChanged={() => setRefresh((n) => n + 1)} />}
 
           <Card title="Details" bodyClassName="text-sm">
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2">

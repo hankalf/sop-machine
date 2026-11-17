@@ -62,20 +62,23 @@ export function IconButton({ label, className, children, ...rest }: ButtonHTMLAt
   );
 }
 
+/** Fields fill their container unless the caller sets a width (w-56, flex-1…). */
+const fieldWidth = (className?: string) => (className && /(^|\s)(w-|flex-1|grow)/.test(className) ? '' : 'w-full');
+
 const fieldBase =
-  'block w-full rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-brand disabled:bg-slate-50 disabled:text-slate-500';
+  'block rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-brand disabled:bg-slate-50 disabled:text-slate-500';
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...rest }, ref) {
-  return <input ref={ref} className={cx(fieldBase, 'h-9', className)} {...rest} />;
+  return <input ref={ref} className={cx(fieldBase, fieldWidth(className), 'h-9', className)} {...rest} />;
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...rest }, ref) {
-  return <textarea ref={ref} className={cx(fieldBase, 'min-h-20 leading-relaxed', className)} {...rest} />;
+  return <textarea ref={ref} className={cx(fieldBase, fieldWidth(className), 'min-h-20 leading-relaxed', className)} {...rest} />;
 });
 
 export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
-    <select className={cx(fieldBase, 'h-9 pr-8', className)} {...rest}>
+    <select className={cx(fieldBase, fieldWidth(className), 'h-9 pr-8', className)} {...rest}>
       {children}
     </select>
   );

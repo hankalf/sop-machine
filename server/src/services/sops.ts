@@ -2,6 +2,7 @@ import { deepMerge, emptyContent } from '../../../shared/defaults';
 import type { Revision, Sop, SopContent, SopSource, SopStatus, SopSummary, SopUpdate, User } from '../../../shared/types';
 import { db } from '../db';
 import { badRequest, newId, notFound, nowIso } from '../util';
+import { sopEvents } from './events';
 import { getSettings } from './settings';
 import { getCategory } from './templates';
 
@@ -22,6 +23,7 @@ interface SopRow {
   source: SopSource;
   published_revision_id: string | null;
   published_version: string | null;
+  owner_user_id: string | null;
   created_by: string | null;
   updated_by: string | null;
   approved_by: string | null;
@@ -41,6 +43,7 @@ export function normalizeContent(raw: unknown): SopContent {
     media: (s.media ?? []).filter((m) => m && m.mediaId).map((m) => ({ mediaId: m.mediaId, caption: m.caption ?? '' })),
   }));
   c.attachments = (c.attachments ?? []).filter((m) => m && m.mediaId);
+  c.checklist.fields = (c.checklist.fields ?? []).filter((f) => f && f.label?.trim()).map((f, i) => ({ id: f.id || `f${i + 1}`, label: f.label.trim(), required: !!f.required }));
   c.safety = c.safety.filter((x) => typeof x === 'string' && x.trim());
   c.tools = c.tools.filter((x) => typeof x === 'string' && x.trim());
   return c;
@@ -70,8 +73,10 @@ function toSop(r: SopRow): Sop {
     source: r.source,
     coverMediaId: firstImage(content),
     stepCount: content.steps.filter((s) => s.kind === 'step').length,
+    checklist: content.checklist.enabled,
     publishedVersion: r.published_version,
     publishedRevisionId: r.published_revision_id,
+    ownerUserId: r.owner_user_id ?? r.created_by,
     createdBy: r.created_by,
     updatedBy: r.updated_by,
     approvedBy: r.approved_by,
@@ -95,6 +100,7 @@ function summarize(s: Sop): SopSummary {
     tags: s.tags,
     coverMediaId: s.coverMediaId,
     stepCount: s.stepCount,
+    checklist: s.checklist,
     publishedVersion: s.publishedVersion,
     reviewDate: s.reviewDate,
     createdAt: s.createdAt,
@@ -136,6 +142,14 @@ export function getSopForUser(id: string, user: User): Sop {
   if (user.role !== 'viewer') return sop;
   if (sop.status === 'approved') return sop;
   if (!sop.publishedRevisionId) throw notFound('SOP not found');
+  return getRevisionSnapshot(sop.publishedRevisionId);
+}
+
+/** The version floor staff should see: the working copy if approved, else the last approved snapshot. */
+export function getPublishedSop(id: string): Sop | null {
+  const sop = getSop(id);
+  if (sop.status === 'approved') return sop;
+  if (!sop.publishedRevisionId) return null;
   return getRevisionSnapshot(sop.publishedRevisionId);
 }
 
@@ -211,8 +225,8 @@ export function createSop(
   const tags = input.tags ?? [];
   const owner = input.owner ?? user.name;
   db.prepare(
-    `INSERT INTO sops (id, number, title, category_id, template_id, status, version, owner, approver, tags, content, search_text, source, created_by, updated_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sops (id, number, title, category_id, template_id, status, version, owner, approver, tags, content, search_text, source, created_by, updated_by, created_at, updated_at, owner_user_id)
+     VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     number,
@@ -230,6 +244,7 @@ export function createSop(
     user.id,
     now,
     now,
+    user.id,
   );
   return getSop(id);
 }
@@ -250,6 +265,7 @@ export function updateSop(id: string, patch: SopUpdate, user: User): Sop {
     templateId: patch.templateId !== undefined ? patch.templateId : current.templateId,
     owner: patch.owner ?? current.owner,
     approver: patch.approver ?? current.approver,
+    ownerUserId: patch.ownerUserId !== undefined ? patch.ownerUserId : current.ownerUserId,
     effectiveDate: patch.effectiveDate !== undefined ? patch.effectiveDate : current.effectiveDate,
     reviewDate: patch.reviewDate !== undefined ? patch.reviewDate : current.reviewDate,
     tags: patch.tags ?? current.tags,
@@ -263,7 +279,7 @@ export function updateSop(id: string, patch: SopUpdate, user: User): Sop {
     version = bumpMinor(current.version);
   }
   db.prepare(
-    `UPDATE sops SET number=?, title=?, category_id=?, template_id=?, owner=?, approver=?, effective_date=?, review_date=?, tags=?, content=?,
+    `UPDATE sops SET number=?, title=?, category_id=?, template_id=?, owner=?, approver=?, owner_user_id=?, effective_date=?, review_date=?, tags=?, content=?,
        search_text=?, status=?, version=?, updated_by=?, updated_at=? WHERE id=?`,
   ).run(
     next.number,
@@ -272,6 +288,7 @@ export function updateSop(id: string, patch: SopUpdate, user: User): Sop {
     next.templateId,
     next.owner,
     next.approver,
+    next.ownerUserId,
     next.effectiveDate,
     next.reviewDate,
     JSON.stringify(next.tags),
@@ -324,10 +341,14 @@ export function changeStatus(
         now,
       );
     })();
-    return getSop(id);
+    const approved = getSop(id);
+    sopEvents.emitSop('approved', approved, user, sop.publishedVersion);
+    return approved;
   }
   db.prepare('UPDATE sops SET status = ?, updated_by = ?, updated_at = ? WHERE id = ?').run(input.status, user.id, now, id);
-  return getSop(id);
+  const updated = getSop(id);
+  if (input.status === 'review' && sop.status !== 'review') sopEvents.emitSop('submitted', updated, user);
+  return updated;
 }
 
 export function listRevisions(sopId: string): Revision[] {

@@ -30,7 +30,7 @@ import {
   type ParagraphChild,
 } from 'docx';
 import type { Token, Tokens } from 'marked';
-import { CALLOUT_META, STATUS_LABELS, fillTokens } from '../../../shared/defaults';
+import { CALLOUT_META, DOC_STRINGS, fillTokens, type DocStringKey } from '../../../shared/defaults';
 import type { CalloutType, MediaItem, StepMedia } from '../../../shared/types';
 import { ensureVariant, findMedia } from '../services/media';
 import { formatDate, formatDuration } from '../util';
@@ -70,6 +70,47 @@ class WordBuilder {
     this.muted = hex(d.colors.muted);
     const geo = pageGeometry(d);
     this.contentWidthPx = Math.round((geo.width - geo.margins.side * 2) * 96);
+  }
+
+  // -------------------------------------------------------------------------
+  // Language: English, translated, or bilingual (translation under the English)
+  // -------------------------------------------------------------------------
+
+  txt(en: string, tr: string | undefined): string {
+    const mode = this.ctx.lang.mode;
+    if (mode === 'tr') return tr?.trim() ? tr : en;
+    if (mode === 'bi' && tr?.trim() && tr !== en) return `${en} / ${tr}`;
+    return en;
+  }
+
+  S(key: DocStringKey): string {
+    return this.txt(DOC_STRINGS[key], this.ctx.lang.t?.strings[key]);
+  }
+
+  md(en: string, tr: string | undefined): Paragraph[] {
+    const mode = this.ctx.lang.mode;
+    if (mode === 'tr') return this.markdown(tr?.trim() ? tr : en);
+    if (mode === 'bi' && tr?.trim()) return [...this.markdown(en), ...this.markdown(tr, { italics: true, color: this.muted })];
+    return this.markdown(en);
+  }
+
+  /** Inline runs for a short item; bilingual adds the translation on a new line in italics. */
+  inlineItem(en: string, tr: string | undefined): ParagraphChild[] {
+    const runs = (text: string, style: { italics?: boolean; color?: string } = {}) =>
+      this.inline(mdLexer(text).flatMap((t) => ('tokens' in t ? (t.tokens as Token[]) : [])), style);
+    const mode = this.ctx.lang.mode;
+    if (mode === 'tr') return runs(tr?.trim() ? tr : en);
+    if (mode === 'bi' && tr?.trim()) return [...runs(en), new TextRun({ text: '', break: 1 }), ...runs(tr, { italics: true, color: this.muted })];
+    return runs(en);
+  }
+
+  private trStep(id: string) {
+    return this.ctx.lang.t?.content.steps.find((s) => s.id === id);
+  }
+
+  statusText(): string {
+    const key = ({ draft: 'statusDraft', review: 'statusReview', approved: 'statusApproved', archived: 'statusArchived' } as const)[this.ctx.sop.status];
+    return this.S(key);
   }
 
   // -------------------------------------------------------------------------
@@ -120,9 +161,9 @@ class WordBuilder {
     return out;
   }
 
-  markdown(text: string, opts: { color?: string; indent?: number } = {}): Paragraph[] {
+  markdown(text: string, opts: { color?: string; italics?: boolean } = {}): Paragraph[] {
     const paras: Paragraph[] = [];
-    const style = opts.color ? { color: opts.color } : {};
+    const style = { ...(opts.color ? { color: opts.color } : {}), ...(opts.italics ? { italics: true } : {}) };
     const walkList = (list: Tokens.List, level: number) => {
       const instance = list.ordered ? ++this.numberedInstance : undefined;
       for (const item of list.items) {
@@ -188,11 +229,11 @@ class WordBuilder {
     return id ? this.image(id, maxW, maxH) : null;
   }
 
-  async figure(item: StepMedia, maxW: number, maxH: number): Promise<(Paragraph | Table)[]> {
+  async figure(item: StepMedia, maxW: number, maxH: number, trCaption?: string): Promise<(Paragraph | Table)[]> {
     const m = this.ctx.media.get(item.mediaId);
     if (!m) return [];
     const caption = item.caption
-      ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 120 }, children: [new TextRun({ text: item.caption, size: this.size - 4, color: this.muted, italics: true })] })]
+      ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 120 }, children: [new TextRun({ text: this.txt(item.caption, trCaption), size: this.size - 4, color: this.muted, italics: true })] })]
       : [];
     if (m.kind === 'image') {
       const img = await this.image(m.id, maxW, maxH);
@@ -216,12 +257,12 @@ class WordBuilder {
           alignment: AlignmentType.CENTER,
           children: [
             new ImageRun({ type: 'png', data: qrPng, transformation: { width: 72, height: 72 } }),
-            new TextRun({ text: `  Scan to watch the video${dur ? ` (${dur})` : ''}`, bold: true, size: this.size - 2 }),
+            new TextRun({ text: `  ${this.S('scanVideo')}${dur ? ` (${dur})` : ''}`, bold: true, size: this.size - 2 }),
           ],
         }),
       );
     } else {
-      out.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `Video${dur ? ` (${dur})` : ''}: open the digital SOP to watch.`, italics: true, color: this.muted })] }));
+      out.push(new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${this.S('video')}${dur ? ` (${dur})` : ''}: ${this.S('openDigital')}`, italics: true, color: this.muted })] }));
     }
     return out;
   }
@@ -230,10 +271,11 @@ class WordBuilder {
   // Blocks
   // -------------------------------------------------------------------------
 
-  sectionHeading(label: string): Paragraph {
+  sectionHeading(label: string, key: string): Paragraph {
     const d = this.ctx.design;
     const band = d.style.headingStyle === 'band';
-    const text = d.style.uppercaseHeadings ? label.toUpperCase() : label;
+    const shown = this.txt(label, this.ctx.lang.t?.strings[`section.${key}`]);
+    const text = d.style.uppercaseHeadings ? shown.toUpperCase() : shown;
     return new Paragraph({
       heading: HeadingLevel.HEADING_1,
       keepNext: true,
@@ -249,7 +291,7 @@ class WordBuilder {
     });
   }
 
-  callout(type: CalloutType, text: string): Table | null {
+  callout(type: CalloutType, text: string, tr?: string): Table | null {
     if (type === 'none' || !text.trim()) return null;
     const meta = CALLOUT_META[type];
     const color = hex(meta.color);
@@ -267,8 +309,8 @@ class WordBuilder {
               shading: filled ? { type: ShadingType.CLEAR, fill: hex(meta.bg), color: 'auto' } : undefined,
               margins: { top: 80, bottom: 80, left: 160, right: 160 },
               children: [
-                new Paragraph({ children: [new TextRun({ text: `${type === 'note' || type === 'tip' ? '' : '⚠ '}${meta.label}`, bold: true, color, size: this.size - 3 })] }),
-                ...this.markdown(text),
+                new Paragraph({ children: [new TextRun({ text: `${type === 'note' || type === 'tip' ? '' : '⚠ '}${this.S(type)}`, bold: true, color, size: this.size - 3 })] }),
+                ...this.md(text, tr),
               ],
             }),
           ],
@@ -341,12 +383,12 @@ class WordBuilder {
     });
   }
 
-  listBox(items: string[], fill: string | null, marker: string): (Paragraph | Table)[] {
+  listBox(items: string[], fill: string | null, marker: string, trItems: string[] = []): (Paragraph | Table)[] {
     const paras = items.map(
-      (x) =>
+      (x, i) =>
         new Paragraph({
           spacing: { after: 40 },
-          children: [new TextRun({ text: `${marker}  `, color: this.accent, bold: true }), ...this.inline(mdLexer(x).flatMap((t) => ('tokens' in t ? (t.tokens as Token[]) : [])))],
+          children: [new TextRun({ text: `${marker}  `, color: this.accent, bold: true }), ...this.inlineItem(x, trItems[i])],
         }),
     );
     if (!fill) return paras;
@@ -367,6 +409,7 @@ class WordBuilder {
     const colPct = { small: 34, medium: 44, large: 54 }[d.steps.imageSize];
     const maxH = { small: 230, medium: 320, large: 440 }[d.steps.imageSize];
     for (const step of this.ctx.sop.content.steps) {
+      const ts = this.trStep(step.id);
       if (step.kind === 'section') {
         out.push(
           new Paragraph({
@@ -374,14 +417,15 @@ class WordBuilder {
             keepNext: true,
             spacing: { before: 240, after: 100 },
             border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB', space: 2 } },
-            children: [new TextRun({ text: step.title || 'Section', color: this.primary, bold: true })],
+            children: [new TextRun({ text: this.txt(step.title || 'Section', ts?.title), color: this.primary, bold: true })],
           }),
         );
         continue;
       }
       n += 1;
       const badge = hex(d.colors.stepBadge);
-      const label = d.style.stepStyle === 'label' ? ` STEP ${n} ` : ` ${n} `;
+      const stepWord = (this.ctx.lang.mode === 'tr' ? this.S('step') : DOC_STRINGS.step).toUpperCase();
+      const label = d.style.stepStyle === 'label' ? ` ${stepWord} ${n} ` : ` ${n} `;
       out.push(
         new Paragraph({
           heading: HeadingLevel.HEADING_3,
@@ -389,12 +433,12 @@ class WordBuilder {
           spacing: { before: 200, after: 80 },
           children: [
             new TextRun({ text: label, bold: true, color: hex(d.colors.stepBadgeText), shading: { type: ShadingType.CLEAR, fill: badge, color: 'auto' } }),
-            new TextRun({ text: `  ${step.title || `Step ${n}`}`, bold: true, color: this.text }),
+            new TextRun({ text: `  ${this.txt(step.title || `Step ${n}`, ts?.title)}`, bold: true, color: this.text }),
           ],
         }),
       );
-      const textBlocks: (Paragraph | Table)[] = [...this.markdown(step.body)];
-      const callout = this.callout(step.callout.type, step.callout.text);
+      const textBlocks: (Paragraph | Table)[] = [...this.md(step.body, ts?.body)];
+      const callout = this.callout(step.callout.type, step.callout.text, ts?.callout);
       if (callout) textBlocks.push(callout, new Paragraph({ children: [], spacing: { after: 60 } }));
 
       if (!step.media.length) {
@@ -404,7 +448,7 @@ class WordBuilder {
       if (side) {
         const mediaW = Math.round((this.contentWidthPx * colPct) / 100) - 16;
         const figures: (Paragraph | Table)[] = [];
-        for (const m of step.media) figures.push(...(await this.figure(m, mediaW, maxH)));
+        for (const [mi, m] of step.media.entries()) figures.push(...(await this.figure(m, mediaW, maxH, ts?.captions[mi])));
         const textCell = new TableCell({ width: { size: 100 - colPct, type: WidthType.PERCENTAGE }, margins: { right: 200 }, children: textBlocks.length ? textBlocks : [new Paragraph('')] });
         const mediaCell = new TableCell({ width: { size: colPct, type: WidthType.PERCENTAGE }, children: figures.length ? figures : [new Paragraph('')] });
         out.push(
@@ -418,7 +462,7 @@ class WordBuilder {
       } else {
         out.push(...textBlocks);
         const w = Math.round(this.contentWidthPx * ({ small: 0.55, medium: 0.78, large: 1 }[d.steps.imageSize]));
-        for (const m of step.media) out.push(...(await this.figure(m, w, maxH + 80)));
+        for (const [mi, m] of step.media.entries()) out.push(...(await this.figure(m, w, maxH + 80, ts?.captions[mi])));
       }
     }
     return out;
@@ -432,10 +476,10 @@ class WordBuilder {
     const s = this.ctx.sop;
     return {
       company: this.ctx.settings.branding.companyName,
-      title: s.title,
+      title: this.ctx.lang.mode === 'tr' ? this.ctx.lang.t?.content.title || s.title : s.title,
       number: s.number,
       version: s.version,
-      status: STATUS_LABELS[s.status] ?? s.status,
+      status: this.statusText(),
       category: this.ctx.category?.name ?? '',
       effectiveDate: formatDate(s.effectiveDate) || 'Pending approval',
       printedDate: this.ctx.printedDate,
@@ -457,6 +501,8 @@ class WordBuilder {
       margin: { top: inch(geo.margins.top), bottom: inch(geo.margins.bottom), left: inch(geo.margins.side), right: inch(geo.margins.side), header: inch(0.35), footer: inch(0.35) },
     };
     const rightTab = [{ type: TabStopType.RIGHT, position: inch(geo.width - geo.margins.side * 2) }];
+    const strs = ctx.lang.t?.strings ?? {};
+    const tc = ctx.lang.t?.content;
 
     // Header & footer
     const logo = d.header.enabled && d.header.showLogo ? await this.logo(140, 32) : null;
@@ -481,8 +527,8 @@ class WordBuilder {
             new Paragraph({
               tabStops: rightTab,
               children: [
-                new TextRun({ text: fillTokens(d.footer.left, t), size: 14, color: this.muted }),
-                new TextRun({ text: d.footer.center ? `   ${fillTokens(d.footer.center, t)}` : '', size: 14, color: this.muted, bold: true }),
+                new TextRun({ text: this.txt(fillTokens(d.footer.left, t), strs['footer.left'] && fillTokens(strs['footer.left'], t)), size: 14, color: this.muted }),
+                new TextRun({ text: d.footer.center ? `   ${this.txt(fillTokens(d.footer.center, t), strs['footer.center'] && fillTokens(strs['footer.center'], t))}` : '', size: 14, color: this.muted, bold: true }),
                 ...(d.footer.showPageNumbers
                   ? [new TextRun({ children: ['\tPage ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES], size: 14, color: this.muted })]
                   : []),
@@ -507,23 +553,23 @@ class WordBuilder {
         (k === 'attachments' && !c.attachments.some((a) => ctx.media.has(a.mediaId)));
       if (empty) continue;
       if (k === 'toc') {
-        body.push(this.sectionHeading(sec.label));
+        body.push(this.sectionHeading(sec.label, k));
         body.push(new TableOfContents(sec.label, { hyperlink: true, headingStyleRange: '1-3' }));
         continue;
       }
-      body.push(this.sectionHeading(sec.label));
+      body.push(this.sectionHeading(sec.label, k));
       switch (k) {
         case 'docInfo':
           body.push(
             this.infoTable([
-              ['Document No.', s.number],
-              ['Version', s.version],
-              ['Status', STATUS_LABELS[s.status] ?? s.status],
-              ['Category', ctx.category?.name ?? '—'],
-              ['Effective date', formatDate(s.effectiveDate) || 'On approval'],
-              ['Next review', formatDate(s.reviewDate) || '—'],
-              ['Owner', s.owner || '—'],
-              ['Approver', s.approver || '—'],
+              [this.S('docNo'), s.number],
+              [this.S('version'), s.version],
+              [this.S('status'), this.statusText()],
+              [this.S('category'), ctx.category?.name ?? '—'],
+              [this.S('effectiveDate'), formatDate(s.effectiveDate) || this.S('onApproval')],
+              [this.S('nextReview'), formatDate(s.reviewDate) || '—'],
+              [this.S('owner'), s.owner || '—'],
+              [this.S('approver'), s.approver || '—'],
             ]),
           );
           break;
@@ -531,27 +577,27 @@ class WordBuilder {
         case 'scope':
         case 'responsibilities':
         case 'notes':
-          body.push(...this.markdown(c[k]));
+          body.push(...this.md(c[k], tc?.[k]));
           break;
         case 'safety':
-          body.push(...this.listBox(c.safety, hex('#FFFBEB'), '▲'));
+          body.push(...this.listBox(c.safety, hex('#FFFBEB'), '▲', tc?.safety));
           break;
         case 'tools':
-          body.push(...this.listBox(c.tools, null, '■'));
+          body.push(...this.listBox(c.tools, null, '■', tc?.tools));
           break;
         case 'procedure':
           body.push(...(await this.steps()));
           break;
         case 'attachments':
-          for (const a of c.attachments) body.push(...(await this.figure(a, Math.round(this.contentWidthPx * 0.7), 360)));
+          for (const [ai, a] of c.attachments.entries()) body.push(...(await this.figure(a, Math.round(this.contentWidthPx * 0.7), 360, tc?.attachments[ai])));
           break;
         case 'revisions':
           body.push(
             this.dataTable(
-              ['Version', 'Date', 'Description of change', 'Approved by'],
+              [this.S('version'), this.S('revDate'), this.S('revChange'), this.S('revApprovedBy')],
               ctx.revisions.length
                 ? ctx.revisions.map((r) => [r.version, formatDate(r.createdAt), r.summary, r.createdByName ?? ''])
-                : [[s.version, '—', 'Initial release (pending approval)', '']],
+                : [[s.version, '—', this.S('initialRelease'), '']],
               [12, 18, 48, 22],
             ),
           );
@@ -559,11 +605,11 @@ class WordBuilder {
         case 'approvals':
           body.push(
             this.dataTable(
-              ['Role', 'Name', 'Signature', 'Date'],
+              [this.S('role'), this.S('name'), this.S('signature'), this.S('date')],
               [
-                ['Prepared by', s.owner],
-                ['Reviewed by', ''],
-                ['Approved by', s.approver],
+                [this.S('preparedBy'), s.owner],
+                [this.S('reviewedBy'), ''],
+                [this.S('approvedBy'), s.approver],
               ],
               [20, 30, 32, 18],
               560,
@@ -619,8 +665,11 @@ class WordBuilder {
     const align = d.cover.style === 'centered' ? AlignmentType.CENTER : AlignmentType.LEFT;
     out.push(
       new Paragraph({ alignment: align, children: [new TextRun({ text: ctx.settings.branding.companyName, bold: true, size: 28, color: this.primary })] }),
-      new Paragraph({ alignment: align, spacing: { before: 1600 }, children: [new TextRun({ text: d.cover.subtitle.toUpperCase(), bold: true, size: 20, color: this.accent, characterSpacing: 40 })] }),
-      new Paragraph({ alignment: align, spacing: { before: 120, after: 120 }, children: [new TextRun({ text: s.title, bold: true, size: 60, color: this.text })] }),
+      new Paragraph({ alignment: align, spacing: { before: 1600 }, children: [new TextRun({ text: this.txt(d.cover.subtitle, ctx.lang.t?.strings['cover.subtitle']).toUpperCase(), bold: true, size: 20, color: this.accent, characterSpacing: 40 })] }),
+      new Paragraph({ alignment: align, spacing: { before: 120, after: 120 }, children: [new TextRun({ text: ctx.lang.mode === 'tr' ? ctx.lang.t?.content.title || s.title : s.title, bold: true, size: 60, color: this.text })] }),
+      ...(ctx.lang.mode === 'bi' && ctx.lang.t?.content.title
+        ? [new Paragraph({ alignment: align, spacing: { after: 120 }, children: [new TextRun({ text: ctx.lang.t.content.title, italics: true, size: 34, color: this.muted })] })]
+        : []),
       new Paragraph({
         alignment: align,
         border: { bottom: { style: BorderStyle.SINGLE, size: 18, color: this.accent, space: 6 } },
@@ -629,12 +678,12 @@ class WordBuilder {
       new Paragraph({ spacing: { before: 1400 }, children: [] }),
       this.infoTable(
         [
-          ['Version', s.version],
-          ['Status', STATUS_LABELS[s.status] ?? s.status],
-          ['Effective date', formatDate(s.effectiveDate) || 'On approval'],
-          ['Next review', formatDate(s.reviewDate) || '—'],
-          ['Owner', s.owner || '—'],
-          ['Approver', s.approver || '—'],
+          [this.S('version'), s.version],
+          [this.S('status'), this.statusText()],
+          [this.S('effectiveDate'), formatDate(s.effectiveDate) || this.S('onApproval')],
+          [this.S('nextReview'), formatDate(s.reviewDate) || '—'],
+          [this.S('owner'), s.owner || '—'],
+          [this.S('approver'), s.approver || '—'],
         ],
         2,
       ),
@@ -646,7 +695,7 @@ class WordBuilder {
           spacing: { before: 400 },
           children: [
             new ImageRun({ type: 'png', data: qr, transformation: { width: 90, height: 90 } }),
-            new TextRun({ text: '   Scan for the latest version  ', bold: true, size: 18 }),
+            new TextRun({ text: `   ${this.S('scanLatest')}  `, bold: true, size: 18 }),
             new TextRun({ text: ctx.sopUrl.replace(/^https?:\/\//, ''), size: 16, color: this.muted }),
           ],
         }),

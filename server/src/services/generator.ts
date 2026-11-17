@@ -2,17 +2,21 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import type { CalloutType, GenerationJob, JobStatus, SopContent, Step, User } from '../../../shared/types';
+import type { CalloutType, GenerationJob, JobStatus, JobType, SopContent, Step, User } from '../../../shared/types';
 import { emptyContent } from '../../../shared/defaults';
 import { config } from '../config';
 import { db } from '../db';
 import { newId, notFound, nowIso } from '../util';
-import { type FrameInput, type GeneratedSop, type GenerationContext, sopFromExistingDocument, sopFromFrames, sopFromText } from './ai';
+import { type FrameInput, type GeneratedSop, type GenerationContext, sopFromExistingDocument, sopFromFrames, sopFromText, translateSop } from './ai';
 import { extractDocument } from './documents';
 import { extractFrame, probe, sampleGrayFrames } from './ffmpeg';
-import { getMedia, originalPath, storeBuffer } from './media';
+import { getMedia, migrateToObjectStorage, originalLocalPath, storeBuffer } from './media';
 import { getSettings } from './settings';
-import { createSop } from './sops';
+import { formatTranscript, transcribeVideo, transcriptionConfigured } from './transcribe';
+import { createSop, getSop } from './sops';
+import { alignTranslation, designFor, saveTranslation, sourceContent, sourceStrings } from './translations';
+import { languageInfo } from '../../../shared/defaults';
+import { buildBinder, type BinderInput } from '../render/binder';
 import { listCategories } from './templates';
 
 // ---------------------------------------------------------------------------
@@ -21,13 +25,14 @@ import { listCategories } from './templates';
 
 interface JobRow {
   id: string;
-  type: 'recording' | 'notes' | 'import';
+  type: JobType;
   status: JobStatus;
   progress: number;
   message: string;
   title: string;
   input: string;
   result_sop_id: string | null;
+  result_file: string | null;
   error: string | null;
   created_by: string | null;
   created_at: string;
@@ -65,6 +70,7 @@ const toJob = (r: JobRow): GenerationJob => ({
   message: r.message,
   title: r.title,
   resultSopId: r.result_sop_id,
+  downloadUrl: r.result_file && r.status === 'done' ? `/api/jobs/${r.id}/download` : null,
   error: r.error,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -76,11 +82,17 @@ export function getJob(id: string): GenerationJob {
   return toJob(r);
 }
 
-export function listJobs(limit = 20): GenerationJob[] {
-  return (db.prepare('SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?').all(limit) as JobRow[]).map(toJob);
+export function listJobs(types: JobType[], limit = 20): GenerationJob[] {
+  const marks = types.map(() => '?').join(', ');
+  return (db.prepare(`SELECT * FROM jobs WHERE type IN (${marks}) ORDER BY created_at DESC LIMIT ?`).all(...types, limit) as JobRow[]).map(toJob);
 }
 
-function update(id: string, fields: Partial<Pick<JobRow, 'status' | 'progress' | 'message' | 'result_sop_id' | 'error'>>) {
+export function jobFile(id: string): { file: string; title: string } | null {
+  const r = db.prepare("SELECT result_file, title FROM jobs WHERE id = ? AND status = 'done'").get(id) as { result_file: string | null; title: string } | undefined;
+  return r?.result_file && fs.existsSync(r.result_file) ? { file: r.result_file, title: r.title } : null;
+}
+
+function update(id: string, fields: Partial<Pick<JobRow, 'status' | 'progress' | 'message' | 'result_sop_id' | 'result_file' | 'error'>>) {
   const keys = Object.keys(fields) as (keyof typeof fields)[];
   db.prepare(`UPDATE jobs SET ${keys.map((k) => `${k} = ?`).join(', ')}, updated_at = ? WHERE id = ?`).run(
     ...keys.map((k) => fields[k] ?? null),
@@ -92,52 +104,50 @@ function update(id: string, fields: Partial<Pick<JobRow, 'status' | 'progress' |
 const progress = (id: string, pct: number, message: string) => update(id, { status: 'running', progress: Math.round(pct), message });
 
 // ---------------------------------------------------------------------------
-// Queue (one job at a time; generation is CPU and API heavy)
+// Queues: AI work runs one at a time; exports and storage moves have their own lane
+// so a binder never waits behind a long recording.
 // ---------------------------------------------------------------------------
 
-const queue: string[] = [];
+type Lane = 'ai' | 'files';
+const laneOf = (type: JobType): Lane => (type === 'binder' || type === 'storage' ? 'files' : 'ai');
+const lanes: Record<Lane, { queue: string[]; running: boolean }> = { ai: { queue: [], running: false }, files: { queue: [], running: false } };
 const users = new Map<string, User>();
-let running = false;
 
-function enqueue(jobId: string, user: User) {
-  queue.push(jobId);
+function enqueue(jobId: string, type: JobType, user: User) {
+  const lane = lanes[laneOf(type)];
+  lane.queue.push(jobId);
   users.set(jobId, user);
-  void pump();
+  void pump(lane);
 }
 
-async function pump() {
-  if (running) return;
-  running = true;
+async function pump(lane: { queue: string[]; running: boolean }) {
+  if (lane.running) return;
+  lane.running = true;
   try {
-    while (queue.length) {
-      const id = queue.shift()!;
+    while (lane.queue.length) {
+      const id = lane.queue.shift()!;
       const user = users.get(id)!;
       users.delete(id);
       try {
         await runJob(id, user);
       } catch (err) {
-        console.error('generation job failed', id, err);
+        console.error('job failed', id, err);
         update(id, { status: 'error', error: (err as Error).message.slice(0, 1000), message: 'Failed' });
       }
     }
   } finally {
-    running = false;
+    lane.running = false;
   }
 }
 
-export function createJob(
-  type: GenerationJob['type'],
-  title: string,
-  input: RecordingJobInput | NotesJobInput | ImportJobInput,
-  user: User,
-): GenerationJob {
+export function createJob(type: JobType, title: string, input: unknown, user: User): GenerationJob {
   const id = newId();
   const now = nowIso();
   db.prepare(
     `INSERT INTO jobs (id, type, status, progress, message, title, input, created_by, created_at, updated_at)
      VALUES (?, ?, 'queued', 0, 'Waiting to start', ?, ?, ?, ?, ?)`,
   ).run(id, type, title, JSON.stringify(input), user.id, now, now);
-  enqueue(id, user);
+  enqueue(id, type, user);
   return getJob(id);
 }
 
@@ -152,9 +162,21 @@ export function failInterruptedJobs() {
 
 async function runJob(id: string, user: User) {
   const row = db.prepare('SELECT * FROM jobs WHERE id = ?').get(id) as JobRow;
-  if (row.type === 'recording') await runRecording(id, JSON.parse(row.input) as RecordingJobInput, user);
-  else if (row.type === 'import') await runImport(id, JSON.parse(row.input) as ImportJobInput, user);
-  else await runNotes(id, JSON.parse(row.input) as NotesJobInput, user);
+  const input = JSON.parse(row.input);
+  switch (row.type) {
+    case 'recording':
+      return runRecording(id, input as RecordingJobInput, user);
+    case 'import':
+      return runImport(id, input as ImportJobInput, user);
+    case 'notes':
+      return runNotes(id, input as NotesJobInput, user);
+    case 'translate':
+      return runTranslate(id, input as TranslateJobInput, user);
+    case 'binder':
+      return runBinder(id, input as BinderInput);
+    case 'storage':
+      return runStorageMove(id);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -289,7 +311,7 @@ function toContent(gen: GeneratedSop): SopContent {
 async function runRecording(jobId: string, input: RecordingJobInput, user: User) {
   const settings = getSettings();
   const video = getMedia(input.videoMediaId);
-  const file = originalPath(video.id);
+  const file = await originalLocalPath(video.id);
   progress(jobId, 5, 'Reading the recording');
   const info = await probe(file);
 
@@ -324,7 +346,22 @@ async function runRecording(jobId: string, input: RecordingJobInput, user: User)
       });
     }
 
-    progress(jobId, 35, `Writing the SOP with AI from ${frames.length} frames (this can take a few minutes)`);
+    let narrationNote = '';
+    if (settings.ai.useNarration && transcriptionConfigured) {
+      progress(jobId, 31, 'Transcribing the narration');
+      try {
+        const segments = await transcribeVideo(file);
+        if (segments) {
+          input.ctx.narration = formatTranscript(segments);
+          narrationNote = ' and the narration';
+        }
+      } catch (err) {
+        console.warn('[transcribe] failed; continuing without narration', err);
+        narrationNote = ' (narration could not be transcribed)';
+      }
+    }
+
+    progress(jobId, 35, `Writing the SOP with AI from ${frames.length} frames${narrationNote} (this can take a few minutes)`);
     const gen = await sopFromFrames(settings, frames, input.ctx);
 
     progress(jobId, 85, 'Adding screenshots to the steps');
@@ -350,7 +387,12 @@ async function runRecording(jobId: string, input: RecordingJobInput, user: User)
       { title: gen.title || input.ctx.processName || 'Untitled SOP', categoryId: input.categoryId, content, source: 'ai-recording', tags: gen.tags },
       user,
     );
-    update(jobId, { status: 'done', progress: 100, message: `Created ${content.steps.filter((s) => s.kind === 'step').length} steps`, result_sop_id: sop.id });
+    update(jobId, {
+      status: 'done',
+      progress: 100,
+      message: `Created ${content.steps.filter((s) => s.kind === 'step').length} steps${input.ctx.narration ? ' using the narration' : ''}`,
+      result_sop_id: sop.id,
+    });
   } finally {
     await fsp.rm(workDir, { recursive: true, force: true });
   }
@@ -443,4 +485,37 @@ async function runImport(jobId: string, input: ImportJobInput, user: User) {
     await fsp.rm(workDir, { recursive: true, force: true });
     await fsp.rm(input.filePath, { force: true });
   }
+}
+
+export interface TranslateJobInput {
+  sopId: string;
+  language: string;
+}
+
+async function runTranslate(jobId: string, input: TranslateJobInput, user: User) {
+  const settings = getSettings();
+  const sop = getSop(input.sopId);
+  const language = languageInfo(input.language);
+  progress(jobId, 20, `Translating into ${language.name}`);
+  const source = { content: sourceContent(sop), strings: sourceStrings(designFor(sop)) };
+  const result = await translateSop(settings, source, language);
+  // The SOP may have been edited while translating; save against the text that was translated.
+  const latest = getSop(input.sopId);
+  if (JSON.stringify(sourceContent(latest)) !== JSON.stringify(source.content)) {
+    throw new Error('The SOP changed while it was being translated. Run the translation again.');
+  }
+  saveTranslation(latest, language.code, alignTranslation(source.content, result.content), { ...source.strings, ...result.strings }, user.id);
+  update(jobId, { status: 'done', progress: 100, message: `Translated into ${language.name}`, result_sop_id: sop.id });
+}
+
+async function runBinder(jobId: string, input: BinderInput) {
+  progress(jobId, 2, 'Collecting SOPs');
+  const out = await buildBinder(jobId, input, (pct, message) => progress(jobId, pct, message));
+  update(jobId, { status: 'done', progress: 100, message: `${out.count} SOP${out.count === 1 ? '' : 's'} · ${out.pages} pages`, result_file: out.file });
+}
+
+async function runStorageMove(jobId: string) {
+  progress(jobId, 1, 'Moving files to object storage');
+  const res = await migrateToObjectStorage((done, total) => progress(jobId, Math.max(1, (done / Math.max(total, 1)) * 100), `Moved ${done} of ${total} files`));
+  update(jobId, { status: 'done', progress: 100, message: `Moved ${res.moved} files${res.failed ? `, ${res.failed} failed (see logs)` : ''}` });
 }

@@ -1,11 +1,21 @@
 import type {
+  Acknowledgment,
   AppSettings,
   Category,
+  ChecklistRun,
+  ChecklistRunSummary,
+  CheckItemResult,
   GenerationJob,
+  LanguageOption,
   MediaItem,
   PublicBranding,
+  PublicStationView,
   Revision,
   Sop,
+  SopTranslation,
+  Station,
+  TrainingMatrix,
+  TranslatedContent,
   SopStatus,
   SopSummary,
   SopUpdate,
@@ -19,6 +29,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public loginRequired = false,
   ) {
     super(message);
   }
@@ -38,14 +49,17 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 
 async function toError(res: Response) {
   let message = `Request failed (${res.status})`;
+  let loginRequired = false;
   try {
     const data = await res.json();
     if (data?.error) message = data.error;
+    loginRequired = !!data?.loginRequired;
   } catch {
     /* not JSON */
   }
-  if (res.status === 401) window.dispatchEvent(new Event('sop:unauthorized'));
-  return new ApiError(res.status, message);
+  // Public pages (QR stations, checklists) handle their own sign-in prompts.
+  if (res.status === 401 && !res.url.includes('/api/public/')) window.dispatchEvent(new Event('sop:unauthorized'));
+  return new ApiError(res.status, message, loginRequired);
 }
 
 const get = <T>(url: string) => request<T>('GET', url);
@@ -77,12 +91,20 @@ function qs(params: Record<string, string | undefined | null>) {
   return s ? `?${s}` : '';
 }
 
+/** Which language to show: English, a translation, or both. */
+export interface LangChoice {
+  code: string;
+  bilingual: boolean;
+}
+export const EN: LangChoice = { code: 'en', bilingual: false };
+const langQuery = (l: LangChoice) => (l.code && l.code !== 'en' ? `&lang=${encodeURIComponent(l.code)}${l.bilingual ? '&bi=1' : ''}` : '');
+
 export const api = {
   auth: {
     me: () => get<User>('/api/auth/me'),
     login: (email: string, password: string) => post<User>('/api/auth/login', { email, password }),
     logout: () => post('/api/auth/logout'),
-    updateMe: (body: { name?: string; currentPassword?: string; newPassword?: string }) => put<User>('/api/auth/me', body),
+    updateMe: (body: { name?: string; language?: string; currentPassword?: string; newPassword?: string }) => put<User>('/api/auth/me', body),
   },
   branding: () => get<PublicBranding>('/api/public/branding'),
   sops: {
@@ -94,7 +116,23 @@ export const api = {
     duplicate: (id: string) => post<Sop>(`/api/sops/${id}/duplicate`),
     setStatus: (id: string, body: { status: SopStatus; summary?: string; version?: string }) => post<Sop>(`/api/sops/${id}/status`, body),
     revisions: (id: string) => get<Revision[]>(`/api/sops/${id}/revisions`),
-    renderUrl: (id: string, mode: 'web' | 'paged', version: string | number) => `/api/sops/${id}/render?mode=${mode}&v=${encodeURIComponent(String(version))}`,
+    renderUrl: (id: string, mode: 'web' | 'paged', version: string | number, lang: LangChoice = EN) =>
+      `/api/sops/${id}/render?mode=${mode}&v=${encodeURIComponent(String(version))}${langQuery(lang)}`,
+    exportUrl: (id: string, format: 'pdf' | 'docx', lang: LangChoice = EN) => `/api/sops/${id}/export?format=${format}${langQuery(lang)}`,
+    languages: (id: string) => get<LanguageOption[]>(`/api/sops/${id}/languages`),
+    translations: (id: string) => get<SopTranslation[]>(`/api/sops/${id}/translations`),
+    translate: (id: string, language: string) => post<GenerationJob>(`/api/sops/${id}/translations`, { language }),
+    translation: (id: string, lang: string) =>
+      get<{ source: { content: TranslatedContent; strings: Record<string, string> }; translation: SopTranslation }>(`/api/sops/${id}/translations/${lang}`),
+    saveTranslation: (id: string, lang: string, body: { content: TranslatedContent; strings?: Record<string, string>; reviewed: boolean }) =>
+      put<SopTranslation>(`/api/sops/${id}/translations/${lang}`, body),
+    removeTranslation: (id: string, lang: string) => del(`/api/sops/${id}/translations/${lang}`),
+    acknowledgments: (id: string) => get<{ mine: Acknowledgment | null; all: Acknowledgment[] }>(`/api/sops/${id}/acknowledgments`),
+    acknowledge: (id: string) => post<{ created: boolean; version: string }>(`/api/sops/${id}/acknowledge`),
+    recordTraining: (id: string, people: { name: string; employeeId: string }[], note: string) =>
+      post<{ created: number }>(`/api/sops/${id}/acknowledgments`, { people, note }),
+    stations: (id: string) => get<Station[]>(`/api/sops/${id}/stations`),
+    startRun: (id: string, language: string) => post<ChecklistRun>(`/api/sops/${id}/runs`, { language }),
   },
   media: {
     upload: (files: File[], opts: { parentId?: string; onProgress?: (pct: number) => void } = {}) => {
@@ -137,7 +175,48 @@ export const api = {
     },
     removeLogo: () => del<AppSettings>('/api/settings/logo'),
   },
+  directory: () => get<{ id: string; name: string }[]>('/api/directory'),
   system: () => get<SystemInfo>('/api/system'),
+  migrateStorage: () => post<GenerationJob>('/api/system/storage/migrate'),
+  testEmail: (to: string) => post('/api/settings/test-email', { to }),
+  notifications: () => get<{ id: string; kind: string; recipients: string; subject: string; status: string; error: string | null; createdAt: string }[]>('/api/settings/notifications'),
+  stations: {
+    list: () => get<Station[]>('/api/stations'),
+    create: (s: { name: string; area: string; sopIds: string[]; publicAccess: boolean }) => post<Station>('/api/stations', s),
+    update: (id: string, s: { name: string; area: string; sopIds: string[]; publicAccess: boolean }) => put<Station>(`/api/stations/${id}`, s),
+    rotate: (id: string) => post<Station>(`/api/stations/${id}/rotate`),
+    remove: (id: string) => del(`/api/stations/${id}`),
+  },
+  training: {
+    matrix: (categoryId?: string) => get<TrainingMatrix>(`/api/training/matrix${qs({ categoryId })}`),
+    removeAck: (id: string) => del(`/api/acknowledgments/${id}`),
+  },
+  runs: {
+    list: (f: { sopId?: string; status?: string; failed?: string }) => get<ChecklistRunSummary[]>(`/api/runs${qs(f)}`),
+    get: (id: string) => get<ChecklistRun>(`/api/runs/${id}`),
+    remove: (id: string) => del(`/api/runs/${id}`),
+  },
+  binders: {
+    create: (b: { title?: string; categoryId: string | null; includeDrafts: boolean; language: string; bilingual: boolean }) => post<GenerationJob>('/api/binders', b),
+  },
+  /** QR station pages and checklist runs (no login needed when the station is open). */
+  pub: {
+    station: (token: string) => get<PublicStationView>(`/api/public/stations/${token}`),
+    stationRenderUrl: (token: string, sopId: string, lang: LangChoice) => `/api/public/stations/${token}/sops/${sopId}/render?x=1${langQuery(lang)}`,
+    acknowledge: (token: string, sopId: string, who: { name: string; employeeId: string }) =>
+      post<{ created: boolean; version: string }>(`/api/public/stations/${token}/sops/${sopId}/acknowledge`, who),
+    startRun: (token: string, sopId: string, body: { name: string; employeeId: string; language: string }) =>
+      post<ChecklistRun>(`/api/public/stations/${token}/sops/${sopId}/runs`, body),
+    run: (token: string) => get<ChecklistRun>(`/api/public/runs/${token}`),
+    updateRun: (token: string, body: { fields?: Record<string, string>; results?: Record<string, Partial<CheckItemResult>> }) =>
+      put<ChecklistRun>(`/api/public/runs/${token}`, body),
+    completeRun: (token: string, signature: string) => post<ChecklistRun>(`/api/public/runs/${token}/complete`, { signature }),
+    uploadPhoto: (token: string, file: File) => {
+      const form = new FormData();
+      form.append('photo', file, file.name || 'photo.jpg');
+      return uploadForm<MediaItem>(`/api/public/runs/${token}/photos`, form);
+    },
+  },
   generate: {
     status: () => get<{ configured: boolean }>('/api/generate/status'),
     recording: (form: FormData, onProgress?: (pct: number) => void) => uploadForm<GenerationJob>('/api/generate/recording', form, onProgress),
@@ -145,7 +224,7 @@ export const api = {
     import: (form: FormData, onProgress?: (pct: number) => void) => uploadForm<GenerationJob[]>('/api/generate/import', form, onProgress),
   },
   jobs: {
-    list: () => get<GenerationJob[]>('/api/jobs'),
+    list: (types?: string) => get<GenerationJob[]>(`/api/jobs${qs({ types })}`),
     get: (id: string) => get<GenerationJob>(`/api/jobs/${id}`),
   },
 };
