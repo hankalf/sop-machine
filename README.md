@@ -3,6 +3,7 @@
 One place to write, design, approve and export **every warehouse SOP**, from WMS screens to trailer and dock work, in a single consistent format.
 
 - **Unified SOP format**: Purpose, Scope, Roles, Safety & PPE, Equipment/Systems, numbered Procedure (with phase sections), Notes, Reference media, Revision history and Approvals.
+- **Rich step text**: bold, italic, lists, **tables** (boxed cells in rows and columns, built in a grid editor, with or without a header row; one cell makes a simple box) and **text colours** (red, orange, green, blue, purple, gray). They carry through to the digital view, PDF, Word, binders, phone checklists and translations.
 - **Template Designer** with a live, paginated preview: colors, fonts, cover page, header/footer, step layout, image size, section order and names, watermark, paper size. Assign templates per category.
 - **Screenshots, photos and videos** on any step. Paste screenshots with Ctrl+V or drag and drop, then **mark them up**: boxes, circles, arrows, lines, freehand pen, highlighter, labels, numbered markers with a key printed under the picture, notes with a pointer to the spot they describe, and **redact**. Markup stays editable: reopen a picture to move, resize, recolour or delete any shape, and the box the AI draws around each click target can be adjusted the same way.
 - **AI from a screen recording**: upload a recording of a computer system and get a draft SOP with a screenshot for each step and the button to click highlighted. Phone videos of floor tasks (trailers, docks, forklifts) work too.

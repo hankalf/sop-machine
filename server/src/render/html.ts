@@ -343,6 +343,10 @@ ${(Object.keys(CALLOUT_META) as (keyof typeof CALLOUT_META)[])
   .join('\n')}
 
 /* ---- Tables ---- */
+table.md-table { width: 100%; border-collapse: collapse; margin: 4pt 0 8pt; font-size: .94em; }
+table.md-table th, table.md-table td { border: 1px solid #94a3b8; padding: 4pt 6pt; text-align: left; vertical-align: top; }
+table.md-table th { background: color-mix(in srgb, var(--primary) 12%, white); font-weight: 600; }
+table.md-table tr { break-inside: avoid; }
 table.data { width: 100%; border-collapse: collapse; font-size: .88em; }
 table.data th { background: var(--primary); color: #fff; text-align: left; padding: 5pt 8pt; font-weight: 600; }
 table.data td { padding: 5pt 8pt; border-bottom: 1px solid #e5e7eb; vertical-align: top; }

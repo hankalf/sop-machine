@@ -30,13 +30,13 @@ import {
   type ParagraphChild,
 } from 'docx';
 import type { Token, Tokens } from 'marked';
-import { CALLOUT_META, DOC_STRINGS, fillTokens, type DocStringKey } from '../../../shared/defaults';
+import { CALLOUT_META, DOC_STRINGS, fillTokens, TEXT_COLORS, type DocStringKey, type TextColor } from '../../../shared/defaults';
 import type { CalloutType, MediaItem, StepMedia } from '../../../shared/types';
 import { ensureVariant, findMedia } from '../services/media';
 import { formatDate, formatDuration } from '../util';
 import { type RenderContext, videoUrl } from './context';
 import { pageGeometry } from './html';
-import { mdLexer } from './markdown';
+import { mdLexer, tableHasHeader } from './markdown';
 
 const hex = (c: string) => c.replace('#', '').toUpperCase().padEnd(6, '0').slice(0, 6);
 const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
@@ -87,7 +87,7 @@ class WordBuilder {
     return this.txt(DOC_STRINGS[key], this.ctx.lang.t?.strings[key]);
   }
 
-  md(en: string, tr: string | undefined): Paragraph[] {
+  md(en: string, tr: string | undefined): (Paragraph | Table)[] {
     const mode = this.ctx.lang.mode;
     if (mode === 'tr') return this.markdown(tr?.trim() ? tr : en);
     if (mode === 'bi' && tr?.trim()) return [...this.markdown(en), ...this.markdown(tr, { italics: true, color: this.muted })];
@@ -133,6 +133,11 @@ class WordBuilder {
         case 'br':
           out.push(new TextRun({ text: '', break: 1 }));
           break;
+        case 'textColor': {
+          const c = TEXT_COLORS[(t as Tokens.Generic).color as TextColor];
+          out.push(...this.inline((t as Tokens.Generic).tokens, c ? { ...style, color: hex(c.hex) } : style));
+          break;
+        }
         case 'link': {
           const l = t as Tokens.Link;
           if (/^https?:|^mailto:/i.test(l.href)) {
@@ -161,8 +166,32 @@ class WordBuilder {
     return out;
   }
 
-  markdown(text: string, opts: { color?: string; italics?: boolean } = {}): Paragraph[] {
-    const paras: Paragraph[] = [];
+  /** A Markdown table as a Word table with every cell boxed. */
+  mdTable(t: Tokens.Table, style: { color?: string; italics?: boolean }): Table {
+    const line = { style: BorderStyle.SINGLE, size: 4, color: '94A3B8' };
+    const align = (a: Tokens.TableCell['align']) => (a === 'center' ? AlignmentType.CENTER : a === 'right' ? AlignmentType.RIGHT : AlignmentType.LEFT);
+    const row = (cells: Tokens.TableCell[], head: boolean) =>
+      new TableRow({
+        tableHeader: head,
+        cantSplit: true,
+        children: cells.map(
+          (c) =>
+            new TableCell({
+              shading: head ? { type: ShadingType.CLEAR, fill: 'EEF2F7', color: 'auto' } : undefined,
+              margins: { top: 60, bottom: 60, left: 100, right: 100 },
+              children: [new Paragraph({ alignment: align(c.align), children: this.inline(c.tokens, head ? { ...style, bold: true } : style) })],
+            }),
+        ),
+      });
+    return new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: { top: line, bottom: line, left: line, right: line, insideHorizontal: line, insideVertical: line },
+      rows: [...(tableHasHeader(t) ? [row(t.header, true)] : []), ...t.rows.map((r) => row(r, false))],
+    });
+  }
+
+  markdown(text: string, opts: { color?: string; italics?: boolean } = {}): (Paragraph | Table)[] {
+    const paras: (Paragraph | Table)[] = [];
     const style = { ...(opts.color ? { color: opts.color } : {}), ...(opts.italics ? { italics: true } : {}) };
     const walkList = (list: Tokens.List, level: number) => {
       const instance = list.ordered ? ++this.numberedInstance : undefined;
@@ -188,7 +217,10 @@ class WordBuilder {
     for (const tok of mdLexer(text)) {
       if (tok.type === 'space' || tok.type === 'hr') continue;
       if (tok.type === 'list') walkList(tok as Tokens.List, 0);
-      else if (tok.type === 'heading') {
+      else if (tok.type === 'table') {
+        paras.push(this.mdTable(tok as Tokens.Table, style));
+        paras.push(new Paragraph({ children: [], spacing: { after: 60 } }));
+      } else if (tok.type === 'heading') {
         paras.push(new Paragraph({ children: this.inline((tok as Tokens.Heading).tokens, { ...style, bold: true }), spacing: { before: 80, after: 60 } }));
       } else if (tok.type === 'code') {
         paras.push(new Paragraph({ children: [new TextRun({ text: (tok as Tokens.Code).text, font: 'Consolas' })] }));

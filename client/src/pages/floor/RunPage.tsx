@@ -210,7 +210,12 @@ function StepCard({ step, run, t, result, onResult, onPhoto }: { step: Checklist
       )}
       {open && (
         <div className="space-y-2 px-4 pt-2">
-          {step.bodyHtml && <div className="text-sm leading-relaxed text-slate-700 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_ul]:list-disc [&_ul]:pl-5" dangerouslySetInnerHTML={{ __html: step.bodyHtml }} />}
+          {step.bodyHtml && (
+            <div
+              className="text-sm leading-relaxed text-slate-700 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-1.5 [&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-400 [&_td]:px-2 [&_td]:py-1 [&_td]:align-top [&_th]:border [&_th]:border-slate-400 [&_th]:bg-slate-100 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:list-disc [&_ul]:pl-5"
+              dangerouslySetInnerHTML={{ __html: step.bodyHtml }}
+            />
+          )}
           {step.mediaIds.map((m) => (
             <img key={m} src={`${run.mediaBase}/${m}/display`} alt="" className="w-full rounded-lg ring-1 ring-slate-200" loading="lazy" />
           ))}

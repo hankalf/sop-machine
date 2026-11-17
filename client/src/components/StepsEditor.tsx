@@ -277,7 +277,7 @@ function StepCard({
         </div>
         {step.callout.type !== 'none' && (
           <div className="rounded-lg border-l-4 p-0.5" style={{ borderColor: CALLOUT_META[step.callout.type].color, background: CALLOUT_META[step.callout.type].bg }}>
-            <MarkdownField value={step.callout.text} onChange={(text) => onChange({ ...step, callout: { ...step.callout, text } })} placeholder={`${CALLOUT_META[step.callout.type].label.toLowerCase()} text`} minRows={1} compact />
+            <MarkdownField value={step.callout.text} onChange={(text) => onChange({ ...step, callout: { ...step.callout, text } })} placeholder={`${CALLOUT_META[step.callout.type].label.toLowerCase()} text`} minRows={1} compact tables={false} />
           </div>
         )}
         <MediaGrid

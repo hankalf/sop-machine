@@ -73,6 +73,20 @@ export function defaultSections(enabled: Partial<Record<SectionKey, boolean>> = 
   }));
 }
 
+/**
+ * Colours for words in SOP text, written as {red}text{/red}. Each one reads on white
+ * (at least 4.5:1), so coloured text stays legible on screen and in print.
+ */
+export const TEXT_COLORS = {
+  red: { label: 'Red', hex: '#dc2626' },
+  orange: { label: 'Orange', hex: '#c2410c' },
+  green: { label: 'Green', hex: '#15803d' },
+  blue: { label: 'Blue', hex: '#2563eb' },
+  purple: { label: 'Purple', hex: '#7c3aed' },
+  gray: { label: 'Gray', hex: '#64748b' },
+} as const;
+export type TextColor = keyof typeof TEXT_COLORS;
+
 export const CALLOUT_META: Record<Exclude<CalloutType, 'none'>, { label: string; color: string; bg: string }> = {
   danger: { label: 'DANGER', color: '#b91c1c', bg: '#fef2f2' },
   warning: { label: 'WARNING', color: '#c2410c', bg: '#fff7ed' },

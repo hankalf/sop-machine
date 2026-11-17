@@ -118,6 +118,7 @@ Rules:
 - Do not invent facts. When something is unclear, keep the step generic and list what should be confirmed in "notes".
 - Never copy passwords, personal data, or customer-identifying information into the SOP.
 - purpose, scope, responsibilities and notes are short markdown: a sentence or two, or "- " bullet lists.
+- Information that really is rows and columns (a grid of checks, a code list, a matrix in the source) can be a markdown table inside a step's instructions or the notes: a header row, then a "| --- | --- |" line, then one row per line. Do not use tables for ordinary steps.
 - safety lists PPE and hazards for physical work; leave it empty for pure computer tasks.
 - tools lists equipment, devices and software (e.g. "WMS – Receiving module", "Zebra label printer", "RF scanner").
 - tags are 2-6 short lowercase keywords.${settings.ai.extraInstructions.trim() ? `\n\nAdditional instructions from the administrator:\n${settings.ai.extraInstructions.trim()}` : ''}`;
@@ -402,6 +403,8 @@ Rules:
 - Plain, natural ${language.name} at a basic reading level, in the same direct, imperative style as the English.
 - Translate faithfully. Do not add, drop or soften any step, value, warning or safety requirement.
 - Keep markdown exactly as in the source: **bold**, *italic*, "- " and "1. " lists, line breaks.
+- Keep colour tags such as {red}…{/red} around the translated words they cover, with the same colour name.
+- Keep tables (lines of | cells |) with the same number of rows and columns; translate the text inside the cells and leave the "| --- |" line as it is.
 - Software labels in **bold** (buttons, fields, menus, screen names) stay in English because the screen shows them that way. Add the translation in parentheses after the first mention in each step, e.g. **Confirm Receipt** (Confirmar recepción).
 - Keep SOP numbers, item and location codes, units, model numbers, acronyms (WMS, LPN, PPE…) and product or system names unchanged.
 - Keep every step "id" exactly, and keep every list the same length and order as the source. Empty strings stay empty.
