@@ -1,4 +1,14 @@
 import type {
+  ActionCounts,
+  CorrectiveAction,
+  DashboardData,
+  QuizQuestion,
+  QuizQuestionPublic,
+  QuizResult,
+  RosterPerson,
+  Schedule,
+  ScheduleBoard,
+  Team,
   Acknowledgment,
   AppSettings,
   Category,
@@ -128,7 +138,10 @@ export const api = {
       put<SopTranslation>(`/api/sops/${id}/translations/${lang}`, body),
     removeTranslation: (id: string, lang: string) => del(`/api/sops/${id}/translations/${lang}`),
     acknowledgments: (id: string) => get<{ mine: Acknowledgment | null; all: Acknowledgment[] }>(`/api/sops/${id}/acknowledgments`),
-    acknowledge: (id: string) => post<{ created: boolean; version: string }>(`/api/sops/${id}/acknowledge`),
+    acknowledge: (id: string, answers: Record<string, number> = {}, language = 'en') =>
+      post<{ created: boolean; version: string; quiz?: QuizResult }>(`/api/sops/${id}/acknowledge`, { answers, language }),
+    quiz: (id: string, lang = 'en') => get<{ questions: QuizQuestionPublic[] }>(`/api/sops/${id}/quiz?lang=${encodeURIComponent(lang)}`),
+    suggestQuiz: (id: string, count: number) => post<QuizQuestion[]>(`/api/sops/${id}/quiz/suggest`, { count }),
     recordTraining: (id: string, people: { name: string; employeeId: string }[], note: string) =>
       post<{ created: number }>(`/api/sops/${id}/acknowledgments`, { people, note }),
     stations: (id: string) => get<Station[]>(`/api/sops/${id}/stations`),
@@ -162,7 +175,7 @@ export const api = {
   users: {
     list: () => get<User[]>('/api/users'),
     create: (u: { email: string; name: string; role: string; password: string }) => post<User>('/api/users', u),
-    update: (id: string, u: { name?: string; role?: string; disabled?: boolean; password?: string }) => put<User>(`/api/users/${id}`, u),
+    update: (id: string, u: { name?: string; role?: string; disabled?: boolean; password?: string; teamId?: string | null }) => put<User>(`/api/users/${id}`, u),
     remove: (id: string) => del(`/api/users/${id}`),
   },
   settings: {
@@ -175,15 +188,44 @@ export const api = {
     },
     removeLogo: () => del<AppSettings>('/api/settings/logo'),
   },
-  directory: () => get<{ id: string; name: string }[]>('/api/directory'),
+  directory: () => get<{ id: string; name: string; role: string; teamId: string | null }[]>('/api/directory'),
+  actions: {
+    list: (f: { status?: string; mine?: string; overdue?: string; sopId?: string; stationId?: string }) => get<CorrectiveAction[]>(`/api/actions${qs(f)}`),
+    counts: () => get<ActionCounts>('/api/actions/counts'),
+    get: (id: string) => get<CorrectiveAction>(`/api/actions/${id}`),
+    create: (a: Partial<CorrectiveAction>) => post<CorrectiveAction>('/api/actions', a),
+    update: (id: string, a: Partial<CorrectiveAction>) => put<CorrectiveAction>(`/api/actions/${id}`, a),
+    remove: (id: string) => del(`/api/actions/${id}`),
+  },
+  schedules: {
+    list: () => get<(Schedule & { description: string })[]>('/api/schedules'),
+    board: (days = 7) => get<ScheduleBoard>(`/api/schedules/board?days=${days}`),
+    create: (s: Omit<Schedule, 'id' | 'sopNumber' | 'sopTitle' | 'createdAt'>) => post<Schedule>('/api/schedules', s),
+    update: (id: string, s: Omit<Schedule, 'id' | 'sopNumber' | 'sopTitle' | 'createdAt'>) => put<Schedule>(`/api/schedules/${id}`, s),
+    remove: (id: string) => del(`/api/schedules/${id}`),
+  },
+  teams: {
+    list: () => get<Team[]>('/api/teams'),
+    create: (t: { name: string; categoryIds: string[]; sopIds: string[] }) => post<Team>('/api/teams', t),
+    update: (id: string, t: { name: string; categoryIds: string[]; sopIds: string[] }) => put<Team>(`/api/teams/${id}`, t),
+    remove: (id: string) => del(`/api/teams/${id}`),
+  },
+  roster: {
+    list: () => get<RosterPerson[]>('/api/roster'),
+    create: (p: Omit<RosterPerson, 'id'>) => post<RosterPerson>('/api/roster', p),
+    update: (id: string, p: Omit<RosterPerson, 'id'>) => put<RosterPerson>(`/api/roster/${id}`, p),
+    remove: (id: string) => del(`/api/roster/${id}`),
+    importText: (text: string, teamId: string | null) => post<{ added: number; updated: number }>('/api/roster/import', { text, teamId }),
+  },
+  dashboard: (days: number) => get<DashboardData>(`/api/dashboard?days=${days}`),
   system: () => get<SystemInfo>('/api/system'),
   migrateStorage: () => post<GenerationJob>('/api/system/storage/migrate'),
   testEmail: (to: string) => post('/api/settings/test-email', { to }),
   notifications: () => get<{ id: string; kind: string; recipients: string; subject: string; status: string; error: string | null; createdAt: string }[]>('/api/settings/notifications'),
   stations: {
     list: () => get<Station[]>('/api/stations'),
-    create: (s: { name: string; area: string; sopIds: string[]; publicAccess: boolean }) => post<Station>('/api/stations', s),
-    update: (id: string, s: { name: string; area: string; sopIds: string[]; publicAccess: boolean }) => put<Station>(`/api/stations/${id}`, s),
+    create: (s: { name: string; area: string; sopIds: string[]; publicAccess: boolean; supervisorUserId: string | null }) => post<Station>('/api/stations', s),
+    update: (id: string, s: { name: string; area: string; sopIds: string[]; publicAccess: boolean; supervisorUserId: string | null }) => put<Station>(`/api/stations/${id}`, s),
     rotate: (id: string) => post<Station>(`/api/stations/${id}/rotate`),
     remove: (id: string) => del(`/api/stations/${id}`),
   },
@@ -203,8 +245,9 @@ export const api = {
   pub: {
     station: (token: string) => get<PublicStationView>(`/api/public/stations/${token}`),
     stationRenderUrl: (token: string, sopId: string, lang: LangChoice) => `/api/public/stations/${token}/sops/${sopId}/render?x=1${langQuery(lang)}`,
-    acknowledge: (token: string, sopId: string, who: { name: string; employeeId: string }) =>
-      post<{ created: boolean; version: string }>(`/api/public/stations/${token}/sops/${sopId}/acknowledge`, who),
+    acknowledge: (token: string, sopId: string, body: { name: string; employeeId: string; answers?: Record<string, number>; language?: string }) =>
+      post<{ created: boolean; version: string; quiz?: QuizResult }>(`/api/public/stations/${token}/sops/${sopId}/acknowledge`, body),
+    quiz: (token: string, sopId: string, lang: string) => get<{ questions: QuizQuestionPublic[] }>(`/api/public/stations/${token}/sops/${sopId}/quiz?lang=${encodeURIComponent(lang)}`),
     startRun: (token: string, sopId: string, body: { name: string; employeeId: string; language: string }) =>
       post<ChecklistRun>(`/api/public/stations/${token}/sops/${sopId}/runs`, body),
     run: (token: string) => get<ChecklistRun>(`/api/public/runs/${token}`),

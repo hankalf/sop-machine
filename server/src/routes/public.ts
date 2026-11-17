@@ -14,6 +14,9 @@ import { stationAllowsMedia, stationByToken, stationSop, stationSops, summarizeF
 import { sendOriginal } from '../services/storage';
 import { acknowledge } from '../services/training';
 import { translationFor } from '../services/translations';
+import { quizActive } from '../../../shared/defaults';
+import { publicQuestions } from '../services/quiz';
+import { anonymousKey, recordView } from '../services/views';
 import { HttpError, badRequest, param, parseBody } from '../util';
 import { upload } from './upload';
 
@@ -35,7 +38,7 @@ publicRouter.get('/stations/:token', (req, res) => {
   const view: PublicStationView = {
     station: { id: s.id, name: s.name, area: s.area, publicAccess: s.publicAccess },
     branding: publicBranding(),
-    sops: stationSops(s).map(summarizeForStation),
+    sops: stationSops(s).map((x) => summarizeForStation(x, s.id)),
     trainingEnabled: settings.training.enabled,
     languages: LANGUAGES.filter((l) => settings.languages.enabled.includes(l.code)),
     signedIn: !!user,
@@ -55,6 +58,8 @@ publicRouter.get('/stations/:token/sops/:sopId/render', async (req, res) => {
     translation: translationFor(sop, lang, 'exact'),
     mediaBase: `/api/public/stations/${s.token}/media`,
   });
+  const viewer = userFromRequest(req);
+  recordView(sop.id, viewer ? `u:${viewer.id}` : anonymousKey(req.ip, s.id), true, s.id);
   res.setHeader('Cache-Control', 'no-store');
   res.type('html').send(renderHtml(ctx));
 });
@@ -79,15 +84,23 @@ publicRouter.get('/stations/:token/media/:mediaId/:variant', async (req, res) =>
 
 const person = z.object({ name: z.string().trim().max(120).default(''), employeeId: z.string().trim().max(60).default('') });
 
+publicRouter.get('/stations/:token/sops/:sopId/quiz', (req, res) => {
+  const { s } = station(req);
+  const sop = stationSop(s, param(req, 'sopId'));
+  if (!quizActive(sop.content)) return void res.json({ questions: [] });
+  const lang = typeof req.query.lang === 'string' ? req.query.lang : 'en';
+  res.json({ questions: publicQuestions(sop, translationFor(sop, lang, 'exact')) });
+});
+
 publicRouter.post('/stations/:token/sops/:sopId/acknowledge', writeLimiter, (req, res) => {
   const { s, user } = station(req);
   if (!getSettings().training.enabled) throw badRequest('Sign-off is turned off');
   const sop = stationSop(s, param(req, 'sopId'));
-  const body = parseBody(person, req);
+  const body = parseBody(person.extend({ answers: z.record(z.string(), z.number().int()).default({}), language: z.string().max(8).default('en') }), req);
   const result = acknowledge(
     sop.id,
     user ? { userId: user.id, name: user.name } : { name: body.name, employeeId: body.employeeId },
-    { method: 'station', stationId: s.id },
+    { method: 'station', stationId: s.id, answers: body.answers, language: body.language },
   );
   res.json(result);
 });

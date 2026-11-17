@@ -9,6 +9,8 @@ import { Button, cx, ErrorText, Field, Input, Modal, PageLoader } from '../../co
 import { languageInfo } from '@shared/defaults';
 import { publicText } from '../../publicText';
 import { FloorShell, loadFloorLang, loadPerson, saveFloorLang, savePerson } from './shared';
+import type { QuizQuestionPublic, QuizResult } from '@shared/types';
+import { QuizForm } from '../../components/quiz/QuizForm';
 
 /** One SOP at a station: read it, then sign off or start its checklist. */
 export default function StationSopPage() {
@@ -24,6 +26,9 @@ export default function StationSopPage() {
   const [busy, setBusy] = useState(false);
   const [signed, setSigned] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [quiz, setQuiz] = useState<QuizQuestionPublic[] | null>(null);
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [result, setResult] = useState<QuizResult | null>(null);
 
   if (view.isLoading) return <PageLoader />;
   const sop = view.data?.sops.find((s) => s.id === sopId);
@@ -46,9 +51,24 @@ export default function StationSopPage() {
     try {
       savePerson(person);
       if (kind === 'sign') {
-        const r = await api.pub.acknowledge(token, sopId, person);
+        if (sop.quiz && !quiz) {
+          const q = await api.pub.quiz(token, sopId, available);
+          if (q.questions.length) {
+            setQuiz(q.questions);
+            setAnswers({});
+            setResult(null);
+            setAsk('sign');
+            return;
+          }
+        }
+        const r = await api.pub.acknowledge(token, sopId, { ...person, answers, language: available });
+        if (r.quiz && !r.quiz.passed) {
+          setResult(r.quiz);
+          return;
+        }
         setSigned(true);
         setAsk(null);
+        setQuiz(null);
         toast.success(r.created ? t.signedThanks : t.alreadySigned);
       } else {
         const run = await api.pub.startRun(token, sopId, { ...person, language: available });
@@ -109,22 +129,42 @@ export default function StationSopPage() {
 
       <Modal
         open={!!ask}
-        onClose={() => setAsk(null)}
-        title={ask === 'run' ? t.startChecklist : t.signOffTitle}
+        onClose={() => {
+          setAsk(null);
+          setQuiz(null);
+        }}
+        title={ask === 'run' ? t.startChecklist : quiz ? t.quizTitle : t.signOffTitle}
         footer={
-          <Button variant="primary" size="lg" className="w-full" loading={busy} onClick={() => ask && act(ask)}>
-            {ask === 'run' ? t.startChecklist : t.signOffButton}
+          <Button
+            variant="primary"
+            size="lg"
+            className="w-full"
+            loading={busy}
+            disabled={!!quiz && quiz.some((q) => answers[q.id] === undefined)}
+            onClick={() => ask && act(ask)}
+          >
+            {ask === 'run' ? t.startChecklist : quiz ? t.quizSubmit : t.signOffButton}
           </Button>
         }
       >
         <div className="space-y-4">
-          {ask === 'sign' && <p className="text-sm text-slate-700">{t.signOffText}</p>}
-          <Field label={t.yourName}>
-            <Input value={person.name} onChange={(e) => setPerson({ ...person, name: e.target.value })} autoFocus autoComplete="name" className="h-11 text-base" />
-          </Field>
-          <Field label={t.employeeId}>
-            <Input value={person.employeeId} onChange={(e) => setPerson({ ...person, employeeId: e.target.value })} className="h-11 text-base" />
-          </Field>
+          {quiz ? (
+            <QuizForm questions={quiz} answers={answers} onAnswer={(qid, o) => setAnswers((a) => ({ ...a, [qid]: o }))} result={result} intro={t.quizIntro} wrongText={t.quizWrong} large />
+          ) : (
+            <>
+              {ask === 'sign' && <p className="text-sm text-slate-700">{t.signOffText}</p>}
+              {!v.signedIn && (
+                <>
+                  <Field label={t.yourName}>
+                    <Input value={person.name} onChange={(e) => setPerson({ ...person, name: e.target.value })} autoFocus autoComplete="name" className="h-11 text-base" />
+                  </Field>
+                  <Field label={t.employeeId}>
+                    <Input value={person.employeeId} onChange={(e) => setPerson({ ...person, employeeId: e.target.value })} className="h-11 text-base" />
+                  </Field>
+                </>
+              )}
+            </>
+          )}
           <ErrorText error={error} />
         </div>
       </Modal>

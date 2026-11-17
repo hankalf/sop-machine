@@ -204,7 +204,7 @@ export default function TemplateDesigner() {
             </Panel>
 
             <Panel icon={<LayoutList className="size-4" />} title="Headings & callouts">
-              <Field label="Section heading style">
+              <Field group label="Section heading style">
                 <div className="grid grid-cols-4 gap-2">
                   {(['underline', 'band', 'leftbar', 'plain'] as const).map((s) => (
                     <Choice key={s} active={d.style.headingStyle === s} onClick={() => up('style', { headingStyle: s })} label={{ underline: 'Underline', band: 'Band', leftbar: 'Side bar', plain: 'Plain' }[s]}>
@@ -213,14 +213,14 @@ export default function TemplateDesigner() {
                   ))}
                 </div>
               </Field>
-              <Field label="Warning & tip boxes">
+              <Field group label="Warning & tip boxes">
                 <Segmented value={d.style.calloutStyle} onChange={(v) => up('style', { calloutStyle: v })} options={[{ value: 'filled', label: 'Filled' }, { value: 'outlined', label: 'Outlined' }]} />
               </Field>
               <Range label="Corner rounding" value={d.style.cornerRadius} min={0} max={16} step={1} unit="px" onChange={(v) => up('style', { cornerRadius: v })} />
             </Panel>
 
             <Panel icon={<ListOrdered className="size-4" />} title="Steps & images">
-              <Field label="Step number style">
+              <Field group label="Step number style">
                 <div className="grid grid-cols-3 gap-2">
                   {(['badge', 'label', 'card'] as const).map((s) => (
                     <Choice key={s} active={d.style.stepStyle === s} onClick={() => up('style', { stepStyle: s })} label={{ badge: 'Circle', label: 'Label', card: 'Card' }[s]}>
@@ -229,7 +229,7 @@ export default function TemplateDesigner() {
                   ))}
                 </div>
               </Field>
-              <Field label="Image placement">
+              <Field group label="Image placement">
                 <div className="grid grid-cols-3 gap-2">
                   <Choice active={d.steps.layout === 'side-by-side' && d.steps.imagePosition === 'right'} onClick={() => up('steps', { layout: 'side-by-side', imagePosition: 'right' })} label="Right">
                     <LayoutSample kind="right" />
@@ -242,7 +242,7 @@ export default function TemplateDesigner() {
                   </Choice>
                 </div>
               </Field>
-              <Field label="Image size">
+              <Field group label="Image size">
                 <Segmented value={d.steps.imageSize} onChange={(v) => up('steps', { imageSize: v })} options={[{ value: 'small', label: 'Small' }, { value: 'medium', label: 'Medium' }, { value: 'large', label: 'Large' }]} />
               </Field>
               <Toggle checked={d.steps.imageBorder} onChange={(v) => up('steps', { imageBorder: v })} label="Border around images" />
@@ -295,13 +295,13 @@ export default function TemplateDesigner() {
             </Panel>
 
             <Panel icon={<Printer className="size-4" />} title="Page setup">
-              <Field label="Paper size">
+              <Field group label="Paper size">
                 <Segmented value={d.page.size} onChange={(v) => up('page', { size: v })} options={[{ value: 'Letter', label: 'Letter' }, { value: 'A4', label: 'A4' }, { value: 'Legal', label: 'Legal' }]} />
               </Field>
-              <Field label="Orientation">
+              <Field group label="Orientation">
                 <Segmented value={d.page.orientation} onChange={(v) => up('page', { orientation: v })} options={[{ value: 'portrait', label: 'Portrait' }, { value: 'landscape', label: 'Landscape' }]} />
               </Field>
-              <Field label="Margins">
+              <Field group label="Margins">
                 <Segmented value={d.page.margins} onChange={(v) => up('page', { margins: v })} options={[{ value: 'narrow', label: 'Narrow' }, { value: 'normal', label: 'Normal' }, { value: 'wide', label: 'Wide' }]} />
               </Field>
             </Panel>

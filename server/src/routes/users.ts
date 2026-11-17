@@ -39,9 +39,11 @@ usersRouter.put('/:id', (req, res) => {
       disabled: z.boolean().optional(),
       password: z.string().min(8).optional(),
       language: z.string().min(2).max(8).optional(),
+      teamId: z.string().nullable().optional(),
     }),
     req,
   );
+  if (body.teamId !== undefined) db.prepare('UPDATE users SET team_id = ? WHERE id = ?').run(body.teamId, param(req, 'id'));
   const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Parameters<typeof toUser>[0] & { password_hash: string } | undefined;
   if (!row) throw notFound('User not found');
   const demoting = (body.role && body.role !== 'admin') || body.disabled === true;

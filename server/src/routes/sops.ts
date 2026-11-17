@@ -25,7 +25,12 @@ import { startRun } from '../services/runs';
 import { getStation, stationsForSop } from '../services/stations';
 import { acknowledge, listAcknowledgments, myAcknowledgment } from '../services/training';
 import { deleteTranslations, exactLanguages, listTranslations, sourceContent, sourceStrings, designFor, translationFor, updateTranslation } from '../services/translations';
-import { badRequest, forbidden, param, parseBody } from '../util';
+import { quizActive } from '../../../shared/defaults';
+import { suggestQuiz } from '../services/ai';
+import { publicQuestions } from '../services/quiz';
+import { getSettings as settingsNow } from '../services/settings';
+import { recordView } from '../services/views';
+import { badRequest, forbidden, newId, param, parseBody } from '../util';
 
 export const sopsRouter = Router();
 
@@ -40,6 +45,14 @@ const content = z.object({
       requireNoteOnFail: z.boolean(),
     })
     .default({ enabled: false, style: 'passfail', fields: [], requireSignature: true, requireNoteOnFail: true }),
+  quiz: z
+    .object({
+      enabled: z.boolean(),
+      questions: z
+        .array(z.object({ id: z.string().max(40), question: z.string().max(500), options: z.array(z.string().max(300)).max(5), correctIndex: z.number().int(), explanation: z.string().max(500) }))
+        .max(10),
+    })
+    .default({ enabled: false, questions: [] }),
   purpose: z.string().max(20000),
   scope: z.string().max(20000),
   responsibilities: z.string().max(20000),
@@ -133,6 +146,8 @@ sopsRouter.get('/:id/render', async (req, res) => {
   const mode = req.query.mode === 'paged' ? 'paged' : 'web';
   const l = langFor(req, sop, req.user!);
   const ctx = await buildContext(sop, { mode, purpose: mode === 'paged' ? 'preview' : 'view', language: l.code, bilingual: l.bilingual, translation: l.translation });
+  // The SOP page asks to be counted; editor previews don't.
+  if (req.query.track === '1') recordView(sop.id, `u:${req.user!.id}`, req.user!.role === 'viewer');
   res.type('html').send(renderHtml(ctx));
 });
 
@@ -176,6 +191,7 @@ const translatedContent = z.object({
   steps: z.array(z.object({ id: z.string(), title: z.string().max(300), body: z.string().max(20000), callout: z.string().max(5000), captions: z.array(z.string().max(500)) })),
   attachments: z.array(z.string().max(500)),
   checklistFields: z.array(z.string().max(80)),
+  quiz: z.array(z.object({ question: z.string().max(500), options: z.array(z.string().max(300)), explanation: z.string().max(500) })).default([]),
 });
 
 sopsRouter.put('/:id/translations/:lang', requireRole('editor'), (req, res) => {
@@ -196,9 +212,27 @@ sopsRouter.get('/:id/acknowledgments', (req, res) => {
   res.json({ mine: myAcknowledgment(sop, req.user!), all: listAcknowledgments(getSop(sop.id)) });
 });
 
-sopsRouter.post('/:id/acknowledge', (req, res) => {
+/** Quiz questions (without answers) for the version this user would sign. */
+sopsRouter.get('/:id/quiz', (req, res) => {
   const sop = getSopForUser(param(req, 'id'), req.user!);
-  res.json(acknowledge(sop.id, { userId: req.user!.id, name: req.user!.name }, { method: 'app' }));
+  const published = sop.status === 'approved' ? sop : sop.publishedRevisionId ? getRevisionSnapshot(sop.publishedRevisionId) : null;
+  if (!published || !quizActive(published.content)) return void res.json({ questions: [] });
+  const lang = typeof req.query.lang === 'string' ? req.query.lang : 'en';
+  res.json({ questions: publicQuestions(published, translationFor(published, lang, 'exact')) });
+});
+
+sopsRouter.post('/:id/acknowledge', (req, res) => {
+  const body = parseBody(z.object({ answers: z.record(z.string(), z.number().int()).default({}), language: z.string().max(8).default('en') }), req);
+  const sop = getSopForUser(param(req, 'id'), req.user!);
+  res.json(acknowledge(sop.id, { userId: req.user!.id, name: req.user!.name }, { method: 'app', answers: body.answers, language: body.language }));
+});
+
+/** Draft quiz questions from the SOP text. The editor reviews them before saving. */
+sopsRouter.post('/:id/quiz/suggest', requireRole('editor'), async (req, res) => {
+  const body = parseBody(z.object({ count: z.number().int().min(1).max(8).default(3) }), req);
+  const sop = getSop(param(req, 'id'));
+  const questions = await suggestQuiz(settingsNow(), sourceContent(sop), body.count);
+  res.json(questions.map((q) => ({ id: newId(), ...q })));
 });
 
 /** A supervisor records training for associates (e.g. after a toolbox talk). */

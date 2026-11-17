@@ -6,6 +6,7 @@ import { mdToHtml } from '../render/markdown';
 import { referencedMediaIds } from '../render/context';
 import { badRequest, newId, notFound, nowIso } from '../util';
 import { getPublishedSop, getSop } from './sops';
+import { sopEvents } from './events';
 import { translationFor } from './translations';
 
 interface RunRow {
@@ -175,7 +176,7 @@ export function updateRun(token: string, patch: { fields?: Record<string, string
   }
   const fields = patch.fields ? cleanFields(snap.sop, patch.fields) : JSON.parse(r.fields);
   const fails = Object.values(results).filter((x) => x.result === 'fail').length;
-  db.prepare('UPDATE checklist_runs SET results = ?, fields = ?, fail_count = ? WHERE id = ?').run(JSON.stringify(results), JSON.stringify(fields), fails, r.id);
+  db.prepare('UPDATE checklist_runs SET results = ?, fields = ?, fail_count = ?, last_activity_at = ? WHERE id = ?').run(JSON.stringify(results), JSON.stringify(fields), fails, nowIso(), r.id);
   return getRunByToken(token);
 }
 
@@ -197,6 +198,8 @@ export function completeRun(token: string, signature: string): ChecklistRun {
   }
   if (cfg.requireSignature && !signature.trim()) throw badRequest('Type your name to sign');
   db.prepare("UPDATE checklist_runs SET status = 'completed', signature = ?, completed_at = ? WHERE id = ?").run(signature.trim().slice(0, 120), nowIso(), r.id);
+  // Supervisors and records work in English, whatever language the associate used.
+  sopEvents.emitSop('checklistCompleted', getRunById(r.id));
   return getRunByToken(token);
 }
 

@@ -69,7 +69,11 @@ export default function NotificationsSettings() {
           <Toggle checked={n.onSubmitted} onChange={(v) => set('notifications', { onSubmitted: v })} label="Submitted for review" description="Admins are told when an SOP is waiting for approval." />
           <Toggle checked={n.onApproved} onChange={(v) => set('notifications', { onApproved: v })} label="Approved" description="The owner is told when their SOP is approved." />
           <Toggle checked={n.onNewRevision} onChange={(v) => set('notifications', { onNewRevision: v })} label="New revision needs sign-off" description="People who signed an earlier revision are asked to read and sign the new one." />
-          <Field label="Also copy" hint="Extra addresses for review and approval emails, comma separated (e.g. a safety manager).">
+          <div className="border-t border-slate-100 pt-4 text-xs font-semibold tracking-wide text-slate-500 uppercase">Floor</div>
+          <Toggle checked={n.onChecklistFailed} onChange={(v) => set('notifications', { onChecklistFailed: v })} label="Checklist item failed" description="The station's supervisor (or the SOP's owner) is emailed the moment a checklist is submitted with a failure." />
+          <Toggle checked={n.onActionAssigned} onChange={(v) => set('notifications', { onActionAssigned: v })} label="Corrective action assigned or overdue" description="People are told when an action is given to them, and once when it goes past its due date." />
+          <Toggle checked={n.onMissedChecklist} onChange={(v) => set('notifications', { onMissedChecklist: v })} label="Scheduled checklist missed" description="Supervisors get one email when a shift, day or week ends without its checklist." />
+          <Field label="Also copy" hint="Extra addresses for review, approval and failed-checklist emails, comma separated (e.g. a safety manager).">
             <Input value={n.extraRecipients} onChange={(e) => set('notifications', { extraRecipients: e.target.value })} placeholder="safety@company.com" />
           </Field>
         </div>

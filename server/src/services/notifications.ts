@@ -12,17 +12,17 @@ interface Recipient {
   name: string;
 }
 
-function userById(id: string | null): Recipient | null {
+export function userById(id: string | null): Recipient | null {
   if (!id) return null;
   const r = db.prepare('SELECT email, name FROM users WHERE id = ? AND disabled = 0').get(id) as Recipient | undefined;
   return r ?? null;
 }
 
-function admins(): Recipient[] {
+export function admins(): Recipient[] {
   return db.prepare("SELECT email, name FROM users WHERE role = 'admin' AND disabled = 0").all() as Recipient[];
 }
 
-function extras(): string[] {
+export function extras(): string[] {
   return getSettings()
     .notifications.extraRecipients.split(/[,;\s]+/)
     .map((x) => x.trim())
@@ -52,7 +52,7 @@ ${opts.button ? `<a href="${e(opts.button.url)}" style="display:inline-block;bac
 }
 
 /** Send once per dedupe key. Skips quietly (without recording) while email isn't set up. */
-async function deliver(kind: string, dedupeKey: string, sop: Sop | null, to: string[], subject: string, html: string, text: string) {
+export async function deliver(kind: string, dedupeKey: string, sop: Sop | null, to: string[], subject: string, html: string, text: string) {
   const recipients = [...new Set(to.map((x) => x.toLowerCase()))];
   if (!recipients.length || !emailConfigured || !getSettings().notifications.enabled) return;
   const id = newId();
@@ -92,7 +92,9 @@ export async function sendTestEmail(to: string) {
 }
 
 export function listNotifications(limit = 50) {
-  return db.prepare('SELECT id, kind, recipients, subject, status, error, created_at AS createdAt FROM notifications ORDER BY created_at DESC LIMIT ?').all(limit);
+  return db
+    .prepare("SELECT id, kind, recipients, subject, status, error, created_at AS createdAt FROM notifications WHERE kind != 'marker' ORDER BY created_at DESC LIMIT ?")
+    .all(limit);
 }
 
 /** Review reminders: once when the review date is close, once when it has passed. */

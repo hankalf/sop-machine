@@ -17,7 +17,7 @@ export default function ExportSettings() {
   return (
     <div className="grid max-w-5xl gap-6 lg:grid-cols-2">
       <Card title="Export" description="How SOPs are exported. The page layout itself is designed in Templates." bodyClassName="space-y-5">
-        <Field label="Default format" hint="The main Export button uses this format. The other one is always available too.">
+        <Field group label="Default format" hint="The main Export button uses this format. The other one is always available too.">
           <Segmented value={e.defaultFormat} onChange={(v) => set('export', { defaultFormat: v })} options={[{ value: 'pdf', label: 'PDF' }, { value: 'docx', label: 'Word (.docx)' }]} />
         </Field>
         <Field label="File name" hint={<>Tokens: {'{number} {title} {version} {status} {date} {company}'}. Example: <strong>{example}.pdf</strong></>}>
@@ -30,7 +30,7 @@ export default function ExportSettings() {
             <option value="omit">Leave videos out</option>
           </Select>
         </Field>
-        <Field label="Image quality in PDFs">
+        <Field group label="Image quality in PDFs">
           <Segmented value={e.imageQuality} onChange={(v) => set('export', { imageQuality: v })} options={[{ value: 'standard', label: 'Standard (smaller files)' }, { value: 'high', label: 'High (sharper zoom)' }]} />
         </Field>
         <Toggle checked={e.allowViewerExport} onChange={(v) => set('export', { allowViewerExport: v })} label="Let viewers export" description="Viewers can download approved SOPs as PDF or Word." />

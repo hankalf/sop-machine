@@ -200,11 +200,11 @@ export default function SopViewPage() {
               <span className="hidden text-xs text-slate-500 sm:block">{mode === 'web' ? 'Videos play here. Works on phones and tablets.' : 'Exactly what the PDF will look like.'}</span>
             )}
           </div>
-          <LivePreview src={api.sops.renderUrl(id, mode, `${s.updatedAt}-${refresh}`, lang)} paged={mode === 'paged'} className="h-[calc(100vh-220px)] min-h-[520px]" scrollTarget={scrollTarget} />
+          <LivePreview src={`${api.sops.renderUrl(id, mode, `${s.updatedAt}-${refresh}`, lang)}&track=1`} paged={mode === 'paged'} className="h-[calc(100vh-220px)] min-h-[520px]" scrollTarget={scrollTarget} />
         </div>
 
         <div className="space-y-4">
-          {settings.data?.training.enabled !== false && <SignOffCard sop={s} />}
+          {settings.data?.training.enabled !== false && <SignOffCard sop={s} language={lang.code} />}
           <FloorCard sop={s} language={lang.code} />
           {isEditor && (
             <Card title="Workflow" bodyClassName="space-y-2">

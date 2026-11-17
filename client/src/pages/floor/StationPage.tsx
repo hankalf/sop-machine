@@ -68,8 +68,12 @@ export default function StationPage() {
                   </div>
                   <div className="text-base leading-snug font-semibold">{s.titles[lang] ?? s.title}</div>
                   {s.checklist && (
-                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-brand">
-                      <ListChecks className="size-3" /> {t.checklist}
+                    <span className="mt-1 flex flex-wrap gap-1.5">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-brand">
+                        <ListChecks className="size-3" /> {t.checklist}
+                      </span>
+                      {s.due === 'due' && <span className="inline-flex items-center rounded-full bg-amber-400 px-2 py-0.5 text-[11px] font-bold text-amber-950">{t.dueNow}</span>}
+                      {s.due === 'done' && <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">✓ {t.doneThisShift}</span>}
                     </span>
                   )}
                 </div>

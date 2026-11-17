@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Check, Download, GraduationCap, RefreshCw } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { isRequiredFor } from '@shared/defaults';
 import { api, downloadFile } from '../api';
 import { useToast } from '../components/Toast';
 import { Button, cx, EmptyState, ErrorText, Input, PageLoader, Select } from '../components/ui';
@@ -11,35 +12,44 @@ export default function TrainingPage() {
   const [categoryId, setCategoryId] = useState('');
   const [search, setSearch] = useState('');
   const [onlyGaps, setOnlyGaps] = useState(false);
+  const [teamId, setTeamId] = useState('');
   const toast = useToast();
   const categories = useQuery({ queryKey: ['categories'], queryFn: api.categories.list });
   const matrix = useQuery({ queryKey: ['training', categoryId], queryFn: () => api.training.matrix(categoryId || undefined) });
 
   const m = matrix.data;
-  const stats = useMemo(() => {
-    if (!m) return { current: 0, stale: 0, missing: 0, pct: 0 };
-    let current = 0;
-    let stale = 0;
-    for (const p of m.people) {
-      for (const s of m.sops) {
-        const c = m.cells[p.key]?.[s.id];
-        if (c?.current) current++;
-        else if (c) stale++;
-      }
-    }
-    const total = m.people.length * m.sops.length;
-    return { current, stale, missing: total - current - stale, pct: total ? Math.round((current / total) * 100) : 0 };
-  }, [m]);
+  const teamOf = useMemo(() => new Map((m?.teams ?? []).map((t) => [t.id, t])), [m]);
+  /** Whether this person's team has to sign this SOP. No team means everything. */
+  const required = (p: { teamId: string | null }, s: { id: string; categoryId: string | null }) => isRequiredFor(p.teamId ? teamOf.get(p.teamId) : null, s);
 
   const people = useMemo(() => {
     if (!m) return [];
     const q = search.trim().toLowerCase();
     return m.people.filter((p) => {
       if (q && !`${p.name} ${p.employeeId}`.toLowerCase().includes(q)) return false;
-      if (onlyGaps) return m.sops.some((s) => !m.cells[p.key]?.[s.id]?.current);
+      if (teamId && (teamId === 'none' ? p.teamId : p.teamId !== teamId)) return false;
+      if (onlyGaps) return m.sops.some((s) => required(p, s) && !m.cells[p.key]?.[s.id]?.current);
       return true;
     });
-  }, [m, search, onlyGaps]);
+  }, [m, search, onlyGaps, teamId, teamOf]);
+
+  // Rates count only what each person's team is required to sign.
+  const stats = useMemo(() => {
+    if (!m) return { current: 0, stale: 0, missing: 0, pct: 0 };
+    let current = 0;
+    let stale = 0;
+    let total = 0;
+    for (const p of people) {
+      for (const s of m.sops) {
+        if (!required(p, s)) continue;
+        total++;
+        const c = m.cells[p.key]?.[s.id];
+        if (c?.current) current++;
+        else if (c) stale++;
+      }
+    }
+    return { current, stale, missing: total - current - stale, pct: total ? Math.round((current / total) * 100) : 0 };
+  }, [m, people, teamOf]);
 
   return (
     <div className="space-y-5">
@@ -72,6 +82,17 @@ export default function TrainingPage() {
             </option>
           ))}
         </Select>
+        {!!m?.teams.length && (
+          <Select value={teamId} onChange={(e) => setTeamId(e.target.value)} className="w-48">
+            <option value="">All teams</option>
+            {m.teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+            <option value="none">No team</option>
+          </Select>
+        )}
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={onlyGaps} onChange={(e) => setOnlyGaps(e.target.checked)} className="size-4 accent-[var(--brand)]" />
           Only people with gaps
@@ -108,15 +129,21 @@ export default function TrainingPage() {
                 <tr key={p.key} className="group">
                   <td className="sticky left-0 z-10 border-b border-slate-100 bg-white px-4 py-2 group-hover:bg-slate-50">
                     <div className="font-medium">{p.name}</div>
-                    <div className="text-xs text-slate-500">{p.employeeId || (p.role ? `${p.role} account` : 'no account')}</div>
+                    <div className="text-xs text-slate-500">
+                      {[p.employeeId || (p.role ? `${p.role} account` : p.rosterId ? 'roster' : 'no account'), p.teamId && teamOf.get(p.teamId)?.name].filter(Boolean).join(' · ')}
+                    </div>
                   </td>
                   {m.sops.map((s) => {
                     const c = m.cells[p.key]?.[s.id];
+                    const req = required(p, s);
                     return (
                       <td
                         key={s.id}
-                        className={cx('border-b border-l border-slate-100 px-2 py-2 text-center text-xs', c?.current ? 'bg-emerald-50 text-emerald-800' : c ? 'bg-amber-50 text-amber-800' : 'text-slate-300')}
-                        title={c ? `Signed Rev ${c.version} on ${new Date(c.at).toLocaleDateString()}` : 'Not signed'}
+                        className={cx(
+                          'border-b border-l border-slate-100 px-2 py-2 text-center text-xs',
+                          c?.current ? 'bg-emerald-50 text-emerald-800' : c ? 'bg-amber-50 text-amber-800' : req ? 'text-slate-300' : 'bg-slate-50/70 text-slate-300',
+                        )}
+                        title={c ? `Signed Rev ${c.version} on ${new Date(c.at).toLocaleDateString()}` : req ? 'Not signed' : 'Not required for their team'}
                       >
                         {c?.current ? (
                           <span className="inline-flex items-center gap-1">
@@ -126,8 +153,10 @@ export default function TrainingPage() {
                           <span className="inline-flex items-center gap-1">
                             <RefreshCw className="size-3" /> Rev {c.version}
                           </span>
-                        ) : (
+                        ) : req ? (
                           '—'
+                        ) : (
+                          <span className="text-[10px] tracking-wide uppercase">n/a</span>
                         )}
                       </td>
                     );
@@ -137,7 +166,7 @@ export default function TrainingPage() {
               {!people.length && (
                 <tr>
                   <td colSpan={m.sops.length + 1} className="px-4 py-8 text-center text-slate-500">
-                    {m.people.length ? 'Nobody matches these filters.' : 'No people yet. Add users under Admin, or have associates sign at a station.'}
+                    {m.people.length ? 'Nobody matches these filters.' : 'No people yet. Add users or a roster under Admin, or have associates sign at a station.'}
                   </td>
                 </tr>
               )}
@@ -148,6 +177,7 @@ export default function TrainingPage() {
       <p className="text-xs text-slate-500">
         <span className="mr-3 inline-flex items-center gap-1"><span className="size-2.5 rounded-sm bg-emerald-200" /> signed the current revision</span>
         <span className="mr-3 inline-flex items-center gap-1"><span className="size-2.5 rounded-sm bg-amber-200" /> signed an older revision</span>
+        <span className="mr-3">n/a: not required for their team (set under Admin → Teams & roster)</span>
         Administrators appear once they have signed something.
       </p>
     </div>

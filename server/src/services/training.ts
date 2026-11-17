@@ -1,4 +1,8 @@
-import type { Acknowledgment, Sop, TrainingMatrix, TrainingPerson, User } from '../../../shared/types';
+import { isRequiredFor, quizActive } from '../../../shared/defaults';
+import type { Acknowledgment, QuizResult, Sop, TrainingMatrix, TrainingPerson, User } from '../../../shared/types';
+import { gradeQuiz, recordAttempt } from './quiz';
+import { listTeams } from './teams';
+import { translationFor } from './translations';
 import { db } from '../db';
 import { badRequest, newId, nowIso } from '../util';
 import { getPublishedSop } from './sops';
@@ -31,8 +35,16 @@ export function personKey(p: { userId?: string | null; employeeId?: string; name
 export function acknowledge(
   sopId: string,
   who: { userId?: string | null; name: string; employeeId?: string },
-  meta: { method: Acknowledgment['method']; recordedBy?: string | null; stationId?: string | null; note?: string },
-): { created: boolean; version: string } {
+  meta: {
+    method: Acknowledgment['method'];
+    recordedBy?: string | null;
+    stationId?: string | null;
+    note?: string;
+    /** Quiz answers (question id → option index) and the language they were shown in. */
+    answers?: Record<string, number>;
+    language?: string;
+  },
+): { created: boolean; version: string; quiz?: QuizResult } {
   const sop = getPublishedSop(sopId);
   if (!sop) throw badRequest('Only approved SOPs can be signed off');
   const name = who.name.trim();
@@ -40,6 +52,13 @@ export function acknowledge(
   const key = personKey({ userId: who.userId, employeeId: who.employeeId, name });
   const existing = db.prepare('SELECT id FROM acknowledgments WHERE sop_id = ? AND version = ? AND person_key = ?').get(sop.id, sop.version, key);
   if (existing) return { created: false, version: sop.version };
+  // Self sign-off needs the quiz; a supervisor recording a training session vouches for the group.
+  if (meta.method !== 'recorded' && quizActive(sop.content)) {
+    const translation = meta.language ? translationFor(sop, meta.language, 'exact') : null;
+    const quiz = gradeQuiz(sop, meta.answers ?? {}, translation);
+    recordAttempt(sop, key, quiz);
+    if (!quiz.passed) return { created: false, version: sop.version, quiz };
+  }
   db.prepare(
     `INSERT INTO acknowledgments (id, sop_id, revision_id, version, user_id, person_key, person_name, employee_id, method, recorded_by, station_id, note, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -109,20 +128,32 @@ export function trainingMatrix(categoryId?: string): TrainingMatrix {
   const published = new Map(sops.map((s) => [s.id, s.version]));
 
   const people = new Map<string, TrainingPerson>();
-  const users = db.prepare("SELECT id, name, role FROM users WHERE disabled = 0 AND role != 'admin' ORDER BY name").all() as { id: string; name: string; role: TrainingPerson['role'] }[];
-  for (const u of users) people.set(`u:${u.id}`, { key: `u:${u.id}`, name: u.name, employeeId: '', userId: u.id, role: u.role });
+  const users = db.prepare("SELECT id, name, role, team_id FROM users WHERE disabled = 0 AND role != 'admin' ORDER BY name").all() as {
+    id: string;
+    name: string;
+    role: TrainingPerson['role'];
+    team_id: string | null;
+  }[];
+  for (const u of users) people.set(`u:${u.id}`, { key: `u:${u.id}`, name: u.name, employeeId: '', userId: u.id, role: u.role, teamId: u.team_id, rosterId: null });
+  const roster = db.prepare('SELECT * FROM people WHERE active = 1 ORDER BY name').all() as { id: string; name: string; employee_id: string; team_id: string | null }[];
+  for (const p of roster) {
+    const key = personKey({ employeeId: p.employee_id, name: p.name });
+    people.set(key, { key, name: p.name, employeeId: p.employee_id, userId: null, role: null, teamId: p.team_id, rosterId: p.id });
+  }
 
-  const roles = new Map((db.prepare('SELECT id, role FROM users').all() as { id: string; role: TrainingPerson['role'] }[]).map((u) => [u.id, u.role]));
+  const userInfo = new Map((db.prepare('SELECT id, role, team_id FROM users').all() as { id: string; role: TrainingPerson['role']; team_id: string | null }[]).map((u) => [u.id, u]));
   const cells: TrainingMatrix['cells'] = {};
   const acks = db.prepare('SELECT * FROM acknowledgments ORDER BY created_at ASC').all() as AckRow[];
   for (const a of acks) {
     if (!published.has(a.sop_id)) continue;
     if (!people.has(a.person_key)) {
-      people.set(a.person_key, { key: a.person_key, name: a.person_name, employeeId: a.employee_id, userId: a.user_id, role: (a.user_id && roles.get(a.user_id)) || null });
+      const u = a.user_id ? userInfo.get(a.user_id) : undefined;
+      people.set(a.person_key, { key: a.person_key, name: a.person_name, employeeId: a.employee_id, userId: a.user_id, role: u?.role ?? null, teamId: u?.team_id ?? null, rosterId: null });
     }
     (cells[a.person_key] ??= {})[a.sop_id] = { version: a.version, current: a.version === published.get(a.sop_id), at: a.created_at };
   }
   return {
+    teams: listTeams(),
     people: [...people.values()].sort((a, b) => a.name.localeCompare(b.name)),
     sops: sops.map((s) => ({ id: s.id, number: s.number, title: s.title, version: s.version, categoryId: s.categoryId })),
     cells,
@@ -131,14 +162,16 @@ export function trainingMatrix(categoryId?: string): TrainingMatrix {
 
 export function matrixCsv(m: TrainingMatrix): string {
   const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
-  const header = ['Name', 'Employee ID', ...m.sops.map((s) => `${s.number} ${s.title} (Rev ${s.version})`)].map(q).join(',');
+  const teams = new Map(m.teams.map((t) => [t.id, t]));
+  const header = ['Name', 'Employee ID', 'Team', ...m.sops.map((s) => `${s.number} ${s.title} (Rev ${s.version})`)].map(q).join(',');
   const lines = m.people.map((p) =>
     [
       p.name,
       p.employeeId,
+      p.teamId ? (teams.get(p.teamId)?.name ?? '') : '',
       ...m.sops.map((s) => {
         const c = m.cells[p.key]?.[s.id];
-        if (!c) return 'Not signed';
+        if (!c) return isRequiredFor(p.teamId ? teams.get(p.teamId) : null, s) ? 'Not signed' : 'Not required';
         return `${c.current ? 'Current' : `Needs re-sign (signed Rev ${c.version})`} ${c.at.slice(0, 10)}`;
       }),
     ]

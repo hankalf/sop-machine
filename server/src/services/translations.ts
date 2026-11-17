@@ -34,6 +34,7 @@ export function sourceContent(sop: Sop): TranslatedContent {
     steps: c.steps.map((s) => ({ id: s.id, title: s.title, body: s.body, callout: s.callout.type === 'none' ? '' : s.callout.text, captions: s.media.map((m) => m.caption) })),
     attachments: c.attachments.map((a) => a.caption),
     checklistFields: c.checklist.fields.map((f) => f.label),
+    quiz: c.quiz.questions.map((q) => ({ question: q.question, options: [...q.options], explanation: q.explanation })),
   };
 }
 
@@ -52,15 +53,20 @@ export function designFor(sop: Sop): TemplateDesign {
 }
 
 export function contentHash(sop: Sop): string {
-  return crypto.createHash('sha1').update(JSON.stringify(sourceContent(sop))).digest('hex').slice(0, 20);
+  // SOPs without quiz questions hash exactly as they did before quizzes existed,
+  // so translations made earlier stay valid.
+  const { quiz, ...rest } = sourceContent(sop);
+  return crypto.createHash('sha1').update(JSON.stringify(quiz.length ? { ...rest, quiz } : rest)).digest('hex').slice(0, 20);
 }
 
 function toTranslation(r: TRow, currentHash: string | null): SopTranslation {
+  const content = JSON.parse(r.content) as TranslatedContent;
+  content.quiz ??= [];
   return {
     id: r.id,
     sopId: r.sop_id,
     language: r.language,
-    content: JSON.parse(r.content),
+    content,
     strings: JSON.parse(r.strings),
     sourceVersion: r.source_version,
     status: r.status,
@@ -171,5 +177,10 @@ export function alignTranslation(source: TranslatedContent, tr: Partial<Translat
     steps,
     attachments: arr(tr.attachments, source.attachments.length),
     checklistFields: arr(tr.checklistFields, source.checklistFields.length),
+    quiz: source.quiz.map((q, i) => ({
+      question: tr.quiz?.[i]?.question ?? '',
+      options: arr(tr.quiz?.[i]?.options, q.options.length),
+      explanation: q.explanation ? (tr.quiz?.[i]?.explanation ?? '') : '',
+    })),
   };
 }

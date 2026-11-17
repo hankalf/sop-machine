@@ -19,6 +19,8 @@ import { sopsRouter } from './routes/sops';
 import { templatesRouter } from './routes/templates';
 import { usersRouter } from './routes/users';
 import { opsRouter } from './routes/operations';
+import { manageRouter } from './routes/manage';
+import { startAlerts } from './services/alerts';
 import { publicRouter } from './routes/public';
 import { pruneExports } from './render/binder';
 import { sopEvents } from './services/events';
@@ -37,6 +39,7 @@ seedTemplatesAndCategories();
 failInterruptedJobs();
 resumeProcessing();
 startNotificationScheduler();
+startAlerts();
 void pruneExports();
 setInterval(() => void pruneExports(), 6 * 3600 * 1000);
 
@@ -117,6 +120,7 @@ app.use('/api/users', usersRouter);
 app.use('/api/generate', generateRouter);
 app.use('/api/jobs', jobsRouter);
 app.use('/api', opsRouter);
+app.use('/api', manageRouter);
 app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
 
 // ---- Web client (built by Vite) ----

@@ -1,7 +1,7 @@
-import { BookOpen, GraduationCap, ListChecks, LogOut, MapPin, Menu, Settings, Sparkles, UserCircle2, X } from 'lucide-react';
+import { BarChart3, BookOpen, CalendarCheck, GraduationCap, ListChecks, LogOut, MapPin, Menu, Settings, Sparkles, UserCircle2, Wrench, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api';
 import { useAuth, useCan } from '../auth';
 import { cx } from './ui';
@@ -32,6 +32,7 @@ export default function Layout() {
   const [open, setOpen] = useState(false);
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const counts = useQuery({ queryKey: ['action-counts'], queryFn: api.actions.counts, enabled: isEditor, refetchInterval: 120_000 });
 
   const logout = async () => {
     await api.auth.logout();
@@ -40,12 +41,22 @@ export default function Layout() {
     window.location.reload();
   };
 
-  const links = [
+  const c = counts.data;
+  const links: { to: string; label: string; icon: typeof BookOpen; end?: boolean; show: boolean; badge?: { n: number; alert: boolean; title: string } }[] = [
     { to: '/', label: 'SOP Library', icon: BookOpen, end: true, show: true },
+    { to: '/dashboard', label: 'Dashboard', icon: BarChart3, show: isEditor },
     { to: '/generate', label: 'Generate & import', icon: Sparkles, show: isEditor },
     { to: '/training', label: 'Training', icon: GraduationCap, show: isEditor },
     { to: '/stations', label: 'Stations & QR', icon: MapPin, show: isEditor },
     { to: '/records', label: 'Checklist records', icon: ListChecks, show: isEditor },
+    { to: '/schedules', label: 'Scheduled checklists', icon: CalendarCheck, show: isEditor },
+    {
+      to: '/actions',
+      label: 'Corrective actions',
+      icon: Wrench,
+      show: isEditor,
+      badge: c && c.open ? { n: c.overdue || c.open, alert: c.overdue > 0, title: c.overdue ? `${c.overdue} overdue of ${c.open} open` : `${c.open} open` } : undefined,
+    },
     { to: '/admin', label: 'Admin', icon: Settings, show: isAdmin },
   ];
 
@@ -64,7 +75,12 @@ export default function Layout() {
             }
           >
             <l.icon className="size-4" />
-            {l.label}
+            <span className="flex-1">{l.label}</span>
+            {l.badge && (
+              <span title={l.badge.title} className={cx('min-w-5 rounded-full px-1.5 text-center text-[11px] leading-5 font-semibold', l.badge.alert ? 'bg-red-500 text-white' : 'bg-white/20 text-white')}>
+                {l.badge.n}
+              </span>
+            )}
           </NavLink>
         ))}
     </nav>

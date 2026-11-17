@@ -159,7 +159,7 @@ const getClient = () => (client ??= new Anthropic({ maxRetries: 3, timeout: 15 *
 
 async function callClaude(
   settings: AppSettings,
-  mode: Mode | 'translate',
+  mode: Mode | 'translate' | 'quiz',
   content: Anthropic.Beta.BetaContentBlockParam[],
   schemaOverride?: Record<string, unknown>,
   systemOverride?: string,
@@ -346,6 +346,7 @@ const TranslationSchema = z.object({
   steps: z.array(z.object({ id: z.string(), title: z.string(), body: z.string(), callout: z.string(), captions: z.array(z.string()) })),
   attachments: z.array(z.string()),
   checklistFields: z.array(z.string()),
+  quiz: z.array(z.object({ question: z.string(), options: z.array(z.string()), explanation: z.string() })),
   strings: z.record(z.string(), z.string()),
 });
 
@@ -355,7 +356,7 @@ function translationSchema(stringKeys: string[]) {
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['title', 'purpose', 'scope', 'responsibilities', 'notes', 'safety', 'tools', 'steps', 'attachments', 'checklistFields', 'strings'],
+    required: ['title', 'purpose', 'scope', 'responsibilities', 'notes', 'safety', 'tools', 'steps', 'attachments', 'checklistFields', 'quiz', 'strings'],
     properties: {
       title: { type: 'string' },
       purpose: { type: 'string' },
@@ -375,6 +376,15 @@ function translationSchema(stringKeys: string[]) {
       },
       attachments: arr,
       checklistFields: arr,
+      quiz: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['question', 'options', 'explanation'],
+          properties: { question: { type: 'string' }, options: arr, explanation: { type: 'string' } },
+        },
+      },
       strings: { type: 'object', additionalProperties: false, required: stringKeys, properties: strProps },
     },
   };
@@ -410,4 +420,57 @@ Rules:
   if (!parsed.success) throw new Error(`The translation was not in the expected format: ${parsed.error.issues[0]?.message}`);
   const { strings, ...content } = parsed.data;
   return { content, strings };
+}
+
+// ---------------------------------------------------------------------------
+// Sign-off quiz suggestions
+// ---------------------------------------------------------------------------
+
+const QuizSuggestionSchema = z.object({
+  questions: z.array(z.object({ question: z.string(), options: z.array(z.string()), correct_index: z.number().int(), explanation: z.string() })),
+});
+
+/** Draft a few multiple-choice questions that check the points that matter most in an SOP. */
+export async function suggestQuiz(settings: AppSettings, source: TranslatedContent, count: number) {
+  const system = `You write short comprehension checks for warehouse Standard Operating Procedures. Associates answer them before signing that they have read and understood the procedure.
+
+Rules:
+- Ask about what matters most: safety-critical steps, the correct order, exact values and limits, and what to do when something is wrong. Never ask trivia such as document numbers.
+- Every question must be answerable from the SOP alone, with exactly one correct option.
+- Plain words at a basic reading level. No trick questions, no "all of the above" or "none of the above".
+- Three options per question. Wrong options must be plausible mistakes someone on the floor could really make.
+- Put the correct option in a different position from one question to the next.
+- "explanation" is one short sentence that points the reader back to the right step, without stating the answer letter.`;
+  const raw = await callClaude(
+    settings,
+    'quiz',
+    [{ type: 'text', text: `Write ${count} questions for this SOP.\n<sop>\n${JSON.stringify({ ...source, quiz: undefined }, null, 1)}\n</sop>` }],
+    {
+      type: 'object',
+      additionalProperties: false,
+      required: ['questions'],
+      properties: {
+        questions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['question', 'options', 'correct_index', 'explanation'],
+            properties: {
+              question: { type: 'string' },
+              options: { type: 'array', items: { type: 'string' } },
+              correct_index: { type: 'integer' },
+              explanation: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+    system,
+  );
+  const parsed = QuizSuggestionSchema.safeParse(raw);
+  if (!parsed.success) throw new Error(`The suggestions were not in the expected format: ${parsed.error.issues[0]?.message}`);
+  return parsed.data.questions
+    .filter((q) => q.question.trim() && q.options.length >= 2)
+    .map((q) => ({ question: q.question, options: q.options.slice(0, 5), correctIndex: Math.min(Math.max(q.correct_index, 0), q.options.length - 1), explanation: q.explanation }));
 }

@@ -19,7 +19,7 @@ const RESULT: Record<CheckResult, { label: string; cls: string }> = {
 export default function RecordsPage() {
   const [params, setParams] = useSearchParams();
   const sopId = params.get('sopId') ?? '';
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState(params.get('failed') === '1');
   const [status, setStatus] = useState('');
   const [open, setOpen] = useState<string | null>(null);
   const isAdmin = useCan('admin');

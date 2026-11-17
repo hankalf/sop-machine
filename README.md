@@ -14,11 +14,16 @@ One place to write, design, approve and export **every warehouse SOP**, from WMS
 **On the floor**
 
 - **Training sign-off**: associates confirm "I have read and understood" each approved revision, in the app or by scanning a QR code. Supervisors can record a whole toolbox talk at once. The **Training** page shows who is current on what and exports the matrix for audits. A new revision asks everyone to sign again.
+- **Quiz before sign-off**: add a few multiple-choice questions to an SOP (or let AI suggest them) and people must answer them correctly before their sign-off counts. Wrong answers show a hint pointing back to the right step. First-try pass rates show which SOPs are unclear.
+- **Teams & roster**: group people into teams (Receiving, Dock crew, Maintenance…) and choose which categories or SOPs each team must sign. Paste a roster of associates without accounts (name, employee ID) so sign-off rates have a real denominator; sign-offs at a station match the roster by employee ID.
 - **Stations & QR placards**: create a station per dock door, workstation or machine, pick its SOPs, and print a placard (Letter, half-letter or 4×6). Scanning always opens the current approved version, with or without an account.
 - **Checklist mode**: any SOP can be filled in as a checklist on a phone: pass / fail / N/A per step, required notes on failures, photos, record fields (trailer #, door, seal #) and a typed signature. Every run is saved under **Checklist records** with CSV and PDF export.
+- **Corrective actions**: every failed checklist item opens an action, assigned to the station's supervisor (or the SOP owner) with a due date, and the supervisor is emailed the moment it fails. Safety-callout steps are flagged high priority. An action can't be closed without saying what was done, and overdue ones are emailed once.
+- **Scheduled checklists**: "trailer pre-load inspection at every dock door, every shift" or "forklift inspection, daily". Set your site time zone and shifts once; the **Scheduled checklists** page shows what is due right now, what was done and what was missed, and stations show a *Due now* badge. Supervisors get one email when a shift, day or week ends without its checklist. For one checklist per truck, create a station for each forklift.
+- **Dashboard**: sign-off rates by team, checklists per day with failures, the most-failed checklist items, quiz first-try rates, schedule compliance, open and overdue actions, and approved SOPs nobody has opened on the floor.
 - **Bilingual SOPs**: one-click AI translation into 18 languages, a side-by-side review screen for a bilingual team member, and three ways to show it everywhere (digital view, PDF, Word, binders, checklists): English, translated, or bilingual with the translation under the English.
 - **Binders**: export a whole category (or everything) as one PDF with a cover and a contents page with real page numbers.
-- **Email**: review requests to admins, approval notices to owners, "please re-sign" to people who signed an older revision, and reminders before an SOP's review date.
+- **Email**: review requests to admins, approval notices to owners, "please re-sign" to people who signed an older revision, reminders before an SOP's review date, failed and missed checklists to supervisors, and assigned or overdue corrective actions.
 - **Narrated recordings**: talk while you record. Spoken explanations and warnings are transcribed and worked into the steps.
 - **Object storage**: keep photos and videos in a Railway Bucket (or any S3-compatible storage) instead of the volume, with one-click migration of existing files.
 
@@ -75,8 +80,10 @@ There is no free, key-less service that reads screen recordings at a usable qual
 5. **Admin → Users**: add editors (write SOPs) and viewers (floor associates who read and print).
 6. **Generate & import → Import existing SOPs**: bring in your current SOP library.
 7. **Admin → Languages**: choose the languages your team reads (Spanish is on by default).
-8. **Stations & QR**: create a station per dock door or workstation and print its placard.
+8. **Stations & QR**: create a station per dock door, workstation or forklift, pick its supervisor, and print its placard.
 9. **Admin → Email**: send a test email once the SMTP variables are set.
+10. **Admin → Shifts & actions**: set the site time zone and your shift times (used by scheduled checklists and due dates).
+11. **Admin → Teams & roster**: create teams, choose what each must sign, and paste in associates who don't have accounts.
 
 ---
 
@@ -95,6 +102,10 @@ There is no free, key-less service that reads screen recordings at a usable qual
 | Post SOPs at a dock door | **Stations & QR** → New station → **Placard** |
 | Turn an SOP into a checklist | Edit the SOP → **Checklist mode** |
 | See completed checklists | **Checklist records** |
+| Require a checklist every shift | **Scheduled checklists** → New schedule |
+| Follow up on failed items | **Corrective actions** |
+| Add a quiz to an SOP | Edit the SOP → **Quiz before sign-off** |
+| See sign-off rates and problem areas | **Dashboard** |
 | Print a binder | Library → **Export binder** |
 | Print or send | Open the SOP → **Export PDF** / **Export Word** |
 
@@ -145,6 +156,8 @@ shared/   Types and defaults used by both
 - **Translations** are stored per language and tied to the exact English text they were made from. Floor staff only ever see a translation that matches the approved text; editors see when the English has moved on and can re-translate or correct it.
 - **Stations** have an unguessable link behind the QR code. An open station exposes only its own approved SOPs and their media; the code can be replaced if a placard goes missing.
 - **Checklist runs** keep a snapshot of the SOP revision they were run against, so a record always shows the steps as they were on that day.
+- **Schedules** are worked out on the site's own clock (Admin → Shifts & actions), including night shifts that cross midnight and daylight-saving changes. A period counts as done when a checklist for that SOP is completed at that station during it; a schedule created part-way through a shift starts counting from the next one.
+- **Views** behind the "nobody has opened" list are counted when an SOP is opened from a station or by a viewer account (once per person per half hour); editors and admins aren't counted.
 - AI calls use **Claude Opus 5.5** with structured outputs and automatic server-side fallback; the model and effort can be changed under Admin → AI.
 
 ---
@@ -153,11 +166,11 @@ shared/   Types and defaults used by both
 
 Ideas for later, roughly in order of value:
 
-1. **Corrective actions**: turn a failed checklist item into an assigned task with a due date, and email the supervisor the moment something fails.
-2. **Side-by-side revision compare**: highlight what changed between approved versions, and show that summary when people re-sign.
+1. **Side-by-side revision compare**: highlight what changed between approved versions, and show that summary when people re-sign.
+2. **Fix the SOP from the action**: when a corrective action shows the procedure itself is wrong, open a draft revision of that step straight from the action, so the fix and the document change stay linked.
 3. **Single sign-on** (Microsoft 365 / Google) so associates don't need separate passwords.
 4. **Offline floor mode**: an installable app that keeps approved SOPs and checklists working in trailers and cold storage with poor Wi-Fi.
-5. **Quiz before sign-off**: two or three questions per SOP so sign-off proves understanding, not just a tap.
-6. **Comments on drafts**: reviewers leave comments on a specific step instead of editing it.
-7. **Scheduled checklists**: "forklift pre-shift inspection, every shift, every truck" with a dashboard of what was missed.
-8. **Dashboards**: sign-off rates by team, most-failed checklist items, SOPs nobody has opened.
+5. **Weekly supervisor digest**: one Monday email per supervisor with missed checklists, overdue actions and who on their team still needs to sign.
+6. **Teams or Slack alerts** alongside email for failed checklists and safety-critical actions.
+7. **Comments on drafts**: reviewers leave comments on a specific step instead of editing it.
+8. **Photo required to close**: let high-priority actions require a photo of the fix before they can be marked done.

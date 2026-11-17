@@ -79,6 +79,7 @@ export async function sampleSop(): Promise<{ sop: Sop; category: Category; revis
     updatedAt: now,
     ownerUserId: null,
     content: {
+      quiz: { enabled: false, questions: [] },
       checklist: { ...defaultChecklist(), fields: [{ id: 'trailer', label: 'Trailer #', required: true }, { id: 'door', label: 'Dock door', required: true }] },
       purpose:
         'Make sure every inbound trailer is checked in, secured and unloaded safely, and that the receipt in the WMS matches what was physically delivered.',

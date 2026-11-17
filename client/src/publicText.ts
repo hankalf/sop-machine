@@ -37,6 +37,12 @@ const en = {
   rev: 'Rev',
   saving: 'Saving…',
   saved: 'Saved',
+  quizTitle: 'Quick check',
+  quizIntro: 'Answer these questions to confirm you understood the procedure.',
+  quizWrong: 'Not quite. Read the hint, check the procedure and try again.',
+  quizSubmit: 'Check answers and sign off',
+  dueNow: 'Due now',
+  doneThisShift: 'Done',
 };
 
 const es: typeof en = {
@@ -77,6 +83,12 @@ const es: typeof en = {
   rev: 'Rev',
   saving: 'Guardando…',
   saved: 'Guardado',
+  quizTitle: 'Revisión rápida',
+  quizIntro: 'Responda estas preguntas para confirmar que entendió el procedimiento.',
+  quizWrong: 'No es correcto. Lea la pista, revise el procedimiento e intente de nuevo.',
+  quizSubmit: 'Revisar respuestas y confirmar',
+  dueNow: 'Pendiente ahora',
+  doneThisShift: 'Hecho',
 };
 
 export type PublicText = typeof en;

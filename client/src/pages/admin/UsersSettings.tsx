@@ -18,12 +18,16 @@ export default function UsersSettings() {
   const toast = useToast();
   const { user: me } = useAuth();
   const users = useQuery({ queryKey: ['users'], queryFn: api.users.list });
+  const teams = useQuery({ queryKey: ['teams'], queryFn: api.teams.list });
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', role: 'editor' as Role, password: '' });
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['users'] });
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['teams'] });
+    return qc.invalidateQueries({ queryKey: ['users'] });
+  };
   const run = async (fn: () => Promise<unknown>, msg: string) => {
     try {
       await fn();
@@ -74,6 +78,16 @@ export default function UsersSettings() {
                 {u.email} · {u.lastLoginAt ? `last seen ${timeAgo(u.lastLoginAt)}` : 'never signed in'}
               </div>
             </div>
+            {!!teams.data?.length && (
+              <Select value={u.teamId ?? ''} className="w-40" title="Team (decides which SOPs they must sign)" onChange={(e) => run(() => api.users.update(u.id, { teamId: e.target.value || null }), 'Team updated')}>
+                <option value="">No team</option>
+                {teams.data.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+            )}
             <Select value={u.role} className="w-32" onChange={(e) => run(() => api.users.update(u.id, { role: e.target.value }), 'Role updated')} title={ROLE_INFO[u.role]}>
               <option value="admin">Admin</option>
               <option value="editor">Editor</option>

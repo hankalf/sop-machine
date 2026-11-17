@@ -8,6 +8,7 @@ export interface User {
   name: string;
   role: Role;
   language: string;
+  teamId: string | null;
   disabled: boolean;
   createdAt: string;
   lastLoginAt: string | null;
@@ -53,8 +54,38 @@ export interface ChecklistConfig {
   requireNoteOnFail: boolean;
 }
 
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  /** Index into options. Hidden from viewers (sent as -1). */
+  correctIndex: number;
+  /** Shown when someone picks a wrong answer. */
+  explanation: string;
+}
+
+/** A few questions people must answer correctly before they can sign off. */
+export interface QuizConfig {
+  enabled: boolean;
+  questions: QuizQuestion[];
+}
+
+/** A quiz question as shown to the person answering (no answer key). */
+export interface QuizQuestionPublic {
+  id: string;
+  question: string;
+  options: string[];
+}
+
+export interface QuizResult {
+  passed: boolean;
+  wrong: string[];
+  explanations: Record<string, string>;
+}
+
 export interface SopContent {
   checklist: ChecklistConfig;
+  quiz: QuizConfig;
   purpose: string;
   scope: string;
   responsibilities: string;
@@ -292,12 +323,26 @@ export interface AppSettings {
     /** Terms to keep as-is or translate a certain way. */
     glossary: string;
   };
+  /** Site time zone and shifts, used by scheduled checklists. */
+  schedule: {
+    /** IANA name, e.g. America/Chicago. Empty until an admin sets it (UTC is used meanwhile). */
+    timezone: string;
+    shifts: ShiftDef[];
+  };
+  actions: {
+    /** Open a corrective action for every failed checklist item. */
+    autoCreate: boolean;
+    defaultDueDays: number;
+  };
   notifications: {
     enabled: boolean;
     reviewReminderDays: number;
     onSubmitted: boolean;
     onApproved: boolean;
     onNewRevision: boolean;
+    onChecklistFailed: boolean;
+    onActionAssigned: boolean;
+    onMissedChecklist: boolean;
     /** Extra addresses (comma separated) copied on review and approval emails. */
     extraRecipients: string;
   };
@@ -329,6 +374,14 @@ export interface PublicBranding {
 export type JobStatus = 'queued' | 'running' | 'done' | 'error';
 
 export type JobType = 'recording' | 'notes' | 'import' | 'translate' | 'binder' | 'storage';
+
+export interface ShiftDef {
+  id: string;
+  name: string;
+  /** Local time HH:MM. An end at or before the start means the shift runs past midnight. */
+  start: string;
+  end: string;
+}
 
 export interface GenerationJob {
   id: string;
@@ -381,6 +434,7 @@ export interface TranslatedContent {
   steps: { id: string; title: string; body: string; callout: string; captions: string[] }[];
   attachments: string[];
   checklistFields: string[];
+  quiz: { question: string; options: string[]; explanation: string }[];
 }
 
 export interface SopTranslation {
@@ -427,9 +481,31 @@ export interface TrainingPerson {
   employeeId: string;
   userId: string | null;
   role: Role | null;
+  teamId: string | null;
+  /** Set for people on the roster (no account). */
+  rosterId: string | null;
+}
+
+/** A group of people and the SOPs they must sign. No categories and no SOPs means every SOP. */
+export interface Team {
+  id: string;
+  name: string;
+  categoryIds: string[];
+  sopIds: string[];
+  memberCount: number;
+}
+
+/** An associate without an account, so sign-off rates have a real denominator. */
+export interface RosterPerson {
+  id: string;
+  name: string;
+  employeeId: string;
+  teamId: string | null;
+  active: boolean;
 }
 
 export interface TrainingMatrix {
+  teams: Team[];
   people: TrainingPerson[];
   sops: { id: string; number: string; title: string; version: string; categoryId: string | null }[];
   /** cells[personKey][sopId] */
@@ -447,6 +523,8 @@ export interface Station {
   token: string;
   sopIds: string[];
   publicAccess: boolean;
+  /** Gets failed-checklist and missed-checklist emails and is the default owner of actions here. */
+  supervisorUserId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -460,6 +538,10 @@ export interface StationSopSummary {
   categoryName: string | null;
   categoryColor: string | null;
   checklist: boolean;
+  /** Sign-off needs a short quiz. */
+  quiz: boolean;
+  /** Scheduled checklist state for the current period at this station. */
+  due: 'due' | 'done' | null;
   languages: string[];
   /** SOP title per available language. */
   titles: Record<string, string>;
@@ -524,4 +606,124 @@ export interface ChecklistRun extends ChecklistRunSummary {
   fieldLabels: Record<string, string>;
   steps: ChecklistRunStep[];
   mediaBase: string;
+}
+
+// ---------------------------------------------------------------------------
+// Corrective actions
+// ---------------------------------------------------------------------------
+
+export type ActionStatus = 'open' | 'in_progress' | 'done' | 'cancelled';
+
+export interface CorrectiveAction {
+  id: string;
+  title: string;
+  detail: string;
+  status: ActionStatus;
+  priority: 'normal' | 'high';
+  sopId: string | null;
+  sopNumber: string | null;
+  sopTitle: string | null;
+  stationId: string | null;
+  stationName: string | null;
+  runId: string | null;
+  stepId: string | null;
+  reportedBy: string;
+  mediaIds: string[];
+  assigneeId: string | null;
+  assigneeName: string | null;
+  dueDate: string | null;
+  overdue: boolean;
+  resolution: string;
+  resolvedByName: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ActionCounts {
+  open: number;
+  overdue: number;
+  mine: number;
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled checklists
+// ---------------------------------------------------------------------------
+
+export type ScheduleFrequency = 'shift' | 'daily' | 'weekly' | 'monthly';
+
+export interface Schedule {
+  id: string;
+  sopId: string;
+  sopNumber: string;
+  sopTitle: string;
+  /** One checklist is expected per station per period. Empty means once per period, anywhere. */
+  stationIds: string[];
+  frequency: ScheduleFrequency;
+  /** Days of the week it applies (0 = Sunday). Used by shift and daily schedules. */
+  days: number[];
+  /** Shifts it applies to. Empty means every shift. */
+  shiftIds: string[];
+  active: boolean;
+  createdAt: string;
+}
+
+export type OccurrenceStatus = 'done' | 'failed' | 'missed' | 'due' | 'upcoming';
+
+export interface Occurrence {
+  scheduleId: string;
+  sopId: string;
+  sopNumber: string;
+  sopTitle: string;
+  stationId: string | null;
+  stationName: string | null;
+  start: string;
+  end: string;
+  /** e.g. "Mon Nov 17 · 1st shift" */
+  label: string;
+  /** Local calendar day the period belongs to (YYYY-MM-DD). */
+  day: string;
+  status: OccurrenceStatus;
+  runId: string | null;
+  performer: string | null;
+  completedAt: string | null;
+}
+
+export interface ScheduleBoard {
+  timezone: string;
+  timezoneSet: boolean;
+  now: Occurrence[];
+  history: Occurrence[];
+  stats: { done: number; missed: number; failed: number; compliancePct: number | null; dueNow: number };
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+export interface DashboardData {
+  days: number;
+  library: { total: number; approved: number; drafts: number; inReview: number; reviewDue: number; reviewOverdue: number };
+  training: {
+    current: number;
+    required: number;
+    pct: number | null;
+    needResign: number;
+    teams: { id: string | null; name: string; members: number; current: number; required: number; pct: number | null }[];
+  };
+  quiz: { sopId: string; number: string; title: string; people: number; firstTryPct: number }[];
+  checklists: {
+    completed: number;
+    withFailures: number;
+    perDay: { date: string; passed: number; failed: number }[];
+    topFailed: { sopId: string; number: string; sopTitle: string; stepTitle: string; fails: number; checks: number; rate: number }[];
+  };
+  schedules: { compliancePct: number | null; done: number; missed: number; dueNow: number; active: number };
+  actions: { open: number; overdue: number; closed: number; avgDaysToClose: number | null };
+  views: {
+    trackedSince: string | null;
+    floorViews: number;
+    unopened: { sopId: string; number: string; title: string; approvedAt: string | null; lastFloorView: string | null }[];
+    mostViewed: { sopId: string; number: string; title: string; floorViews: number; totalViews: number }[];
+  };
 }

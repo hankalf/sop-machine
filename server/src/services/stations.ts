@@ -6,6 +6,8 @@ import { referencedMediaIds } from '../render/context';
 import { newId, notFound, nowIso } from '../util';
 import { getPublishedSop } from './sops';
 import { getCategory } from './templates';
+import { quizActive } from '../../../shared/defaults';
+import { dueAtStation } from './schedules';
 import { exactLanguages, translationFor } from './translations';
 
 interface StationRow {
@@ -15,6 +17,7 @@ interface StationRow {
   token: string;
   sop_ids: string;
   public_access: number;
+  supervisor_user_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -26,6 +29,7 @@ const toStation = (r: StationRow): Station => ({
   token: r.token,
   sopIds: JSON.parse(r.sop_ids),
   publicAccess: !!r.public_access,
+  supervisorUserId: r.supervisor_user_id,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -51,19 +55,22 @@ export function stationByToken(token: string): Station {
   return toStation(r);
 }
 
-export function saveStation(id: string | null, input: { name: string; area: string; sopIds: string[]; publicAccess: boolean }): Station {
+export function saveStation(
+  id: string | null,
+  input: { name: string; area: string; sopIds: string[]; publicAccess: boolean; supervisorUserId: string | null },
+): Station {
   const now = nowIso();
   if (id) {
     const res = db
-      .prepare('UPDATE stations SET name = ?, area = ?, sop_ids = ?, public_access = ?, updated_at = ? WHERE id = ?')
-      .run(input.name, input.area, JSON.stringify(input.sopIds), input.publicAccess ? 1 : 0, now, id);
+      .prepare('UPDATE stations SET name = ?, area = ?, sop_ids = ?, public_access = ?, supervisor_user_id = ?, updated_at = ? WHERE id = ?')
+      .run(input.name, input.area, JSON.stringify(input.sopIds), input.publicAccess ? 1 : 0, input.supervisorUserId, now, id);
     if (!res.changes) throw notFound('Station not found');
     return getStation(id);
   }
   const sid = newId();
-  db.prepare('INSERT INTO stations (id, name, area, token, sop_ids, public_access, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    sid, input.name, input.area, newToken(), JSON.stringify(input.sopIds), input.publicAccess ? 1 : 0, now, now,
-  );
+  db.prepare(
+    'INSERT INTO stations (id, name, area, token, sop_ids, public_access, supervisor_user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(sid, input.name, input.area, newToken(), JSON.stringify(input.sopIds), input.publicAccess ? 1 : 0, input.supervisorUserId, now, now);
   return getStation(sid);
 }
 
@@ -92,7 +99,7 @@ export function stationSops(station: Station): Sop[] {
   }).filter((s): s is Sop => !!s);
 }
 
-export function summarizeForStation(sop: Sop): StationSopSummary {
+export function summarizeForStation(sop: Sop, stationId: string): StationSopSummary {
   const cat = getCategory(sop.categoryId);
   const languages = exactLanguages(sop);
   const titles: Record<string, string> = {};
@@ -106,6 +113,8 @@ export function summarizeForStation(sop: Sop): StationSopSummary {
     categoryName: cat?.name ?? null,
     categoryColor: cat?.color ?? null,
     checklist: sop.content.checklist.enabled,
+    quiz: quizActive(sop.content),
+    due: sop.content.checklist.enabled ? dueAtStation(sop.id, stationId) : null,
     languages,
     titles,
   };

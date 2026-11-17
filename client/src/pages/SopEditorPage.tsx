@@ -9,6 +9,7 @@ import { ListEditor, MarkdownField } from '../components/editor-fields';
 import { LivePreview } from '../components/LivePreview';
 import { StatusBadge } from '../components/status';
 import { MediaGrid, StepsEditor, useUploader } from '../components/StepsEditor';
+import { QuizEditorCard } from '../components/quiz/QuizEditorCard';
 import { Button, Card, ErrorText, Field, IconButton, Input, PageLoader, Segmented, Select, Toggle, cx } from '../components/ui';
 import { ListChecks, Plus, Trash2 } from 'lucide-react';
 import type { ChecklistConfig } from '@shared/types';
@@ -316,6 +317,16 @@ export default function SopEditorPage() {
 
             <ChecklistCard value={c.checklist} onChange={(checklist) => patchContent((x) => ({ ...x, checklist }))} />
 
+            <QuizEditorCard
+              sopId={id}
+              value={c.quiz}
+              onChange={(quiz) => patchContent((x) => ({ ...x, quiz }))}
+              beforeSuggest={async () => {
+                window.clearTimeout(timer.current);
+                await save();
+              }}
+            />
+
             <Card title="Notes & references">
               <MarkdownField value={c.notes} onChange={(v) => patchContent((x) => ({ ...x, notes: v }))} placeholder="Related SOPs, forms, definitions…" minRows={2} />
             </Card>
@@ -370,7 +381,7 @@ function ChecklistCard({ value, onChange }: { value: ChecklistConfig; onChange: 
       actions={<Toggle checked={value.enabled} onChange={(enabled) => set({ enabled })} />}
       bodyClassName={value.enabled ? 'space-y-4' : 'hidden'}
     >
-      <Field label="Each step is answered with">
+      <Field group label="Each step is answered with">
         <Segmented value={value.style} onChange={(style) => set({ style })} options={[{ value: 'passfail', label: 'Pass / Fail / N/A (inspections)' }, { value: 'check', label: 'Done / N/A (task lists)' }]} />
       </Field>
       <div>

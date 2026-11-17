@@ -1,10 +1,12 @@
 import { EventEmitter } from 'node:events';
-import type { Sop, User } from '../../../shared/types';
+import type { ChecklistRun, CorrectiveAction, Sop, User } from '../../../shared/types';
 
 /** In-process events so features (email, auto-translate) can react to SOP workflow changes. */
 interface SopEvents {
   submitted: [sop: Sop, by: User];
   approved: [sop: Sop, by: User, previousVersion: string | null];
+  checklistCompleted: [run: ChecklistRun];
+  actionReassigned: [action: CorrectiveAction, by: User];
 }
 
 class TypedEmitter extends EventEmitter {

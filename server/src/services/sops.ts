@@ -43,6 +43,14 @@ export function normalizeContent(raw: unknown): SopContent {
     media: (s.media ?? []).filter((m) => m && m.mediaId).map((m) => ({ mediaId: m.mediaId, caption: m.caption ?? '' })),
   }));
   c.attachments = (c.attachments ?? []).filter((m) => m && m.mediaId);
+  c.quiz.questions = (c.quiz.questions ?? [])
+    .filter((q) => q && typeof q.question === 'string')
+    .slice(0, 10)
+    .map((q) => {
+      const options = (Array.isArray(q.options) ? q.options : []).map((o) => String(o ?? '')).slice(0, 5);
+      const correct = Number.isInteger(q.correctIndex) ? q.correctIndex : 0;
+      return { id: q.id || newId(), question: q.question, options, correctIndex: Math.min(Math.max(correct, 0), Math.max(options.length - 1, 0)), explanation: q.explanation ?? '' };
+    });
   c.checklist.fields = (c.checklist.fields ?? []).filter((f) => f && f.label?.trim()).map((f, i) => ({ id: f.id || `f${i + 1}`, label: f.label.trim(), required: !!f.required }));
   c.safety = c.safety.filter((x) => typeof x === 'string' && x.trim());
   c.tools = c.tools.filter((x) => typeof x === 'string' && x.trim());

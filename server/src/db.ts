@@ -197,6 +197,88 @@ const migrations: string[] = [
     created_at TEXT NOT NULL
   );
   `,
+  // 3: corrective actions, quizzes, scheduled checklists, teams/roster, view tracking
+  `
+  ALTER TABLE users ADD COLUMN team_id TEXT;
+  ALTER TABLE stations ADD COLUMN supervisor_user_id TEXT;
+  ALTER TABLE checklist_runs ADD COLUMN last_activity_at TEXT;
+
+  CREATE TABLE teams (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    category_ids TEXT NOT NULL DEFAULT '[]',
+    sop_ids TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE people (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    employee_id TEXT NOT NULL DEFAULT '',
+    team_id TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE actions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    priority TEXT NOT NULL DEFAULT 'normal',
+    sop_id TEXT,
+    station_id TEXT,
+    run_id TEXT,
+    step_id TEXT,
+    reported_by TEXT NOT NULL DEFAULT '',
+    media_ids TEXT NOT NULL DEFAULT '[]',
+    assignee_id TEXT,
+    due_date TEXT,
+    resolution TEXT NOT NULL DEFAULT '',
+    resolved_by TEXT,
+    resolved_at TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX actions_run_step ON actions(run_id, step_id) WHERE run_id IS NOT NULL;
+  CREATE INDEX actions_status ON actions(status, due_date);
+
+  CREATE TABLE schedules (
+    id TEXT PRIMARY KEY,
+    sop_id TEXT NOT NULL REFERENCES sops(id) ON DELETE CASCADE,
+    station_ids TEXT NOT NULL DEFAULT '[]',
+    frequency TEXT NOT NULL,
+    days TEXT NOT NULL DEFAULT '[1,2,3,4,5]',
+    shift_ids TEXT NOT NULL DEFAULT '[]',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE sop_views (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sop_id TEXT NOT NULL,
+    viewer_key TEXT NOT NULL,
+    floor INTEGER NOT NULL DEFAULT 0,
+    station_id TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX views_sop ON sop_views(sop_id, created_at);
+
+  CREATE TABLE quiz_attempts (
+    id TEXT PRIMARY KEY,
+    sop_id TEXT NOT NULL,
+    version TEXT NOT NULL,
+    person_key TEXT NOT NULL,
+    correct INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    passed INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX quiz_sop ON quiz_attempts(sop_id, created_at);
+  `,
 ];
 
 function migrate() {

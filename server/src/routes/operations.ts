@@ -19,7 +19,7 @@ const size = (v: unknown): PlacardSize => (v === 'half' || v === 'card' ? v : 'l
 
 /** Names for "owner" pickers (editors cannot see the full user admin list). */
 opsRouter.get('/directory', requireRole('editor'), (_req, res) => {
-  res.json(db.prepare("SELECT id, name FROM users WHERE disabled = 0 AND role != 'viewer' ORDER BY name").all());
+  res.json(db.prepare("SELECT id, name, role, team_id AS teamId FROM users WHERE disabled = 0 AND role != 'viewer' ORDER BY name").all());
 });
 
 // ---- Stations ----
@@ -28,6 +28,7 @@ const stationBody = z.object({
   area: z.string().trim().max(80).default(''),
   sopIds: z.array(z.string()).max(100).default([]),
   publicAccess: z.boolean().default(false),
+  supervisorUserId: z.string().nullable().default(null),
 });
 
 opsRouter.get('/stations', requireRole('editor'), (_req, res) => {

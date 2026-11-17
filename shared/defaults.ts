@@ -234,12 +234,24 @@ export function defaultSettings(): AppSettings {
     workflow: { requireApproval: true, reviewIntervalMonths: 12 },
     training: { enabled: true },
     languages: { enabled: ['es'], autoTranslate: false, glossary: '' },
+    schedule: {
+      timezone: '',
+      shifts: [
+        { id: 's1', name: '1st shift', start: '06:00', end: '14:00' },
+        { id: 's2', name: '2nd shift', start: '14:00', end: '22:00' },
+        { id: 's3', name: '3rd shift', start: '22:00', end: '06:00' },
+      ],
+    },
+    actions: { autoCreate: true, defaultDueDays: 3 },
     notifications: {
       enabled: true,
       reviewReminderDays: 30,
       onSubmitted: true,
       onApproved: true,
       onNewRevision: true,
+      onChecklistFailed: true,
+      onActionAssigned: true,
+      onMissedChecklist: true,
       extraRecipients: '',
     },
     ai: {
@@ -262,6 +274,7 @@ export function defaultChecklist(): ChecklistConfig {
 export function emptyContent(): SopContent {
   return {
     checklist: defaultChecklist(),
+    quiz: { enabled: false, questions: [] },
     purpose: '',
     scope: '',
     responsibilities: '',
@@ -398,3 +411,19 @@ export const DOC_STRINGS = {
 } as const;
 
 export type DocStringKey = keyof typeof DOC_STRINGS;
+
+/** Questions that are complete enough to ask. */
+export function usableQuestions<T extends { question: string; options: string[] }>(questions: T[]): T[] {
+  return questions.filter((q) => q.question.trim() && q.options.filter((o) => o.trim()).length >= 2);
+}
+
+export const quizActive = (content: SopContent) => content.quiz.enabled && usableQuestions(content.quiz.questions).length > 0;
+
+/** Whether a team (or no team) has to sign this SOP. */
+export function isRequiredFor(team: { categoryIds: string[]; sopIds: string[] } | null | undefined, sop: { id: string; categoryId: string | null }): boolean {
+  if (!team) return true;
+  if (!team.categoryIds.length && !team.sopIds.length) return true;
+  return team.sopIds.includes(sop.id) || (!!sop.categoryId && team.categoryIds.includes(sop.categoryId));
+}
+
+export const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

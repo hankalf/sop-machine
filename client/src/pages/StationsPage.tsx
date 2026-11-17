@@ -7,7 +7,7 @@ import { useCan } from '../auth';
 import { useToast } from '../components/Toast';
 import { Badge, Button, cx, EmptyState, Field, IconButton, Input, Modal, PageLoader, Select, Toggle } from '../components/ui';
 
-type Draft = { id?: string; name: string; area: string; sopIds: string[]; publicAccess: boolean };
+type Draft = { id?: string; name: string; area: string; sopIds: string[]; publicAccess: boolean; supervisorUserId: string | null };
 
 /** Workstations, dock doors and equipment that get a QR placard. */
 export default function StationsPage() {
@@ -16,6 +16,7 @@ export default function StationsPage() {
   const isAdmin = useCan('admin');
   const stations = useQuery({ queryKey: ['stations'], queryFn: api.stations.list });
   const sops = useQuery({ queryKey: ['sops', 'all'], queryFn: () => api.sops.list({}) });
+  const directory = useQuery({ queryKey: ['directory'], queryFn: api.directory });
   const [editing, setEditing] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [size, setSize] = useState('letter');
@@ -59,14 +60,14 @@ export default function StationsPage() {
             <option value="half">Half-letter placard</option>
             <option value="card">4×6 card</option>
           </Select>
-          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing({ name: '', area: '', sopIds: [], publicAccess: true })}>
+          <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setEditing({ name: '', area: '', sopIds: [], publicAccess: true, supervisorUserId: null })}>
             New station
           </Button>
         </div>
       </div>
 
       {!stations.data?.length ? (
-        <EmptyState icon={<QrCode className="size-10" />} title="No stations yet" action={<Button variant="primary" onClick={() => setEditing({ name: '', area: '', sopIds: [], publicAccess: true })}>Create the first station</Button>}>
+        <EmptyState icon={<QrCode className="size-10" />} title="No stations yet" action={<Button variant="primary" onClick={() => setEditing({ name: '', area: '', sopIds: [], publicAccess: true, supervisorUserId: null })}>Create the first station</Button>}>
           For example "Dock Door 7", "Receiving Desk" or "Forklift 12".
         </EmptyState>
       ) : (
@@ -108,7 +109,7 @@ export default function StationsPage() {
                     <IconButton label="Copy link" onClick={() => navigator.clipboard.writeText(link(st)).then(() => toast.success('Link copied'))}>
                       <Copy className="size-4" />
                     </IconButton>
-                    <IconButton label="Edit" onClick={() => setEditing({ id: st.id, name: st.name, area: st.area, sopIds: st.sopIds, publicAccess: st.publicAccess })}>
+                    <IconButton label="Edit" onClick={() => setEditing({ id: st.id, name: st.name, area: st.area, sopIds: st.sopIds, publicAccess: st.publicAccess, supervisorUserId: st.supervisorUserId })}>
                       <Pencil className="size-4" />
                     </IconButton>
                     {isAdmin && (
@@ -156,6 +157,16 @@ export default function StationsPage() {
                 <Input value={editing.area} onChange={(e) => setEditing({ ...editing, area: e.target.value })} placeholder="e.g. Receiving" />
               </Field>
             </div>
+            <Field label="Supervisor" hint="Gets the email when a checklist here fails or is missed, and owns the corrective actions.">
+              <Select value={editing.supervisorUserId ?? ''} onChange={(e) => setEditing({ ...editing, supervisorUserId: e.target.value || null })}>
+                <option value="">SOP owner / administrators</option>
+                {directory.data?.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
             <Toggle
               checked={editing.publicAccess}
               onChange={(v) => setEditing({ ...editing, publicAccess: v })}

@@ -1,14 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BadgeCheck, ClipboardSignature, RefreshCw, Trash2, UserPlus } from 'lucide-react';
 import { useState } from 'react';
-import type { Sop } from '@shared/types';
+import type { QuizQuestionPublic, QuizResult, Sop } from '@shared/types';
+import { QuizForm } from '../quiz/QuizForm';
 import { api } from '../../api';
 import { useCan } from '../../auth';
 import { useToast } from '../Toast';
 import { Button, Card, Field, IconButton, Modal, Textarea } from '../ui';
 
 /** "Read and understood" sign-off, plus the training record for editors. */
-export function SignOffCard({ sop }: { sop: Sop }) {
+export function SignOffCard({ sop, language }: { sop: Sop; language: string }) {
   const isEditor = useCan('editor');
   const isAdmin = useCan('admin');
   const qc = useQueryClient();
@@ -16,6 +17,9 @@ export function SignOffCard({ sop }: { sop: Sop }) {
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [quiz, setQuiz] = useState<QuizQuestionPublic[] | null>(null);
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [result, setResult] = useState<QuizResult | null>(null);
   const acks = useQuery({ queryKey: ['acks', sop.id], queryFn: () => api.sops.acknowledgments(sop.id) });
 
   if (!sop.publishedVersion) {
@@ -34,7 +38,21 @@ export function SignOffCard({ sop }: { sop: Sop }) {
   const sign = async () => {
     setBusy(true);
     try {
-      await api.sops.acknowledge(sop.id);
+      if (!quiz) {
+        const q = await api.sops.quiz(sop.id, language);
+        if (q.questions.length) {
+          setAnswers({});
+          setResult(null);
+          setQuiz(q.questions);
+          return;
+        }
+      }
+      const r = await api.sops.acknowledge(sop.id, answers, language);
+      if (r.quiz && !r.quiz.passed) {
+        setResult(r.quiz);
+        return;
+      }
+      setQuiz(null);
       await refresh();
       toast.success(`Signed off on revision ${sop.publishedVersion}`);
     } catch (e) {
@@ -100,6 +118,27 @@ export function SignOffCard({ sop }: { sop: Sop }) {
         </div>
       )}
       <RecordModal open={recording} onClose={() => setRecording(false)} sop={sop} onDone={refresh} />
+      <Modal
+        open={!!quiz}
+        onClose={() => setQuiz(null)}
+        title="Quick check before you sign"
+        footer={
+          <Button variant="primary" onClick={sign} loading={busy} disabled={!quiz || quiz.some((q) => answers[q.id] === undefined)}>
+            Check answers and sign off
+          </Button>
+        }
+      >
+        {quiz && (
+          <QuizForm
+            questions={quiz}
+            answers={answers}
+            onAnswer={(qid, o) => setAnswers((a) => ({ ...a, [qid]: o }))}
+            result={result}
+            intro={`Answer these to confirm you understood revision ${sop.publishedVersion}.`}
+            wrongText="Not quite. Read the hint, check the SOP and try again."
+          />
+        )}
+      </Modal>
     </Card>
   );
 }

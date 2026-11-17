@@ -84,7 +84,23 @@ export function Select({ className, children, ...rest }: SelectHTMLAttributes<HT
   );
 }
 
-export function Field({ label, hint, children, className }: { label: ReactNode; hint?: ReactNode; children: ReactNode; className?: string }) {
+/**
+ * A labelled form field. Use `group` when the children are several buttons (Segmented, chips):
+ * a <label> would otherwise give its whole text to the first button as that button's name.
+ */
+export function Field({ label, hint, children, className, group }: { label: ReactNode; hint?: ReactNode; children: ReactNode; className?: string; group?: boolean }) {
+  const id = useId();
+  if (group) {
+    return (
+      <div role="group" aria-labelledby={id} className={cx('block', className)}>
+        <span id={id} className="mb-1.5 block text-xs font-semibold tracking-wide text-slate-600">
+          {label}
+        </span>
+        {children}
+        {hint && <span className="mt-1 block text-xs text-slate-500">{hint}</span>}
+      </div>
+    );
+  }
   return (
     <label className={cx('block', className)}>
       <span className="mb-1.5 block text-xs font-semibold tracking-wide text-slate-600">{label}</span>
@@ -144,6 +160,7 @@ export function Segmented<T extends string>({ value, onChange, options, size = '
           key={o.value}
           type="button"
           title={o.title}
+          aria-pressed={value === o.value}
           onClick={() => onChange(o.value)}
           className={cx(
             'flex flex-1 items-center justify-center gap-1.5 rounded-md font-medium transition',

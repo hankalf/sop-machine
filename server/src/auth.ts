@@ -16,6 +16,7 @@ interface UserRow {
   name: string;
   role: Role;
   language: string;
+  team_id: string | null;
   password_hash: string;
   disabled: number;
   created_at: string;
@@ -47,6 +48,7 @@ export function toUser(row: UserRow): User {
     name: row.name,
     role: row.role,
     language: row.language ?? 'en',
+    teamId: row.team_id ?? null,
     disabled: !!row.disabled,
     createdAt: row.created_at,
     lastLoginAt: row.last_login_at,

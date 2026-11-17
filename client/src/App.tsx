@@ -19,7 +19,12 @@ import TemplatesPage from './pages/admin/TemplatesPage';
 import UsersSettings from './pages/admin/UsersSettings';
 import LanguagesSettings from './pages/admin/LanguagesSettings';
 import NotificationsSettings from './pages/admin/NotificationsSettings';
+import OperationsSettings from './pages/admin/OperationsSettings';
+import TeamsSettings from './pages/admin/TeamsSettings';
+import ActionsPage from './pages/ActionsPage';
+import DashboardPage from './pages/DashboardPage';
 import RecordsPage from './pages/RecordsPage';
+import SchedulesPage from './pages/SchedulesPage';
 import StationsPage from './pages/StationsPage';
 import TrainingPage from './pages/TrainingPage';
 import TranslationEditorPage from './pages/TranslationEditorPage';
@@ -68,6 +73,9 @@ export default function App() {
         <Route path="/training" element={<RequireRole role="editor"><TrainingPage /></RequireRole>} />
         <Route path="/stations" element={<RequireRole role="editor"><StationsPage /></RequireRole>} />
         <Route path="/records" element={<RequireRole role="editor"><RecordsPage /></RequireRole>} />
+        <Route path="/actions" element={<RequireRole role="editor"><ActionsPage /></RequireRole>} />
+        <Route path="/schedules" element={<RequireRole role="editor"><SchedulesPage /></RequireRole>} />
+        <Route path="/dashboard" element={<RequireRole role="editor"><DashboardPage /></RequireRole>} />
         <Route path="/admin" element={<RequireRole role="admin"><AdminLayout /></RequireRole>}>
           <Route index element={<Navigate to="templates" replace />} />
           <Route path="templates" element={<TemplatesPage />} />
@@ -75,6 +83,8 @@ export default function App() {
           <Route path="export" element={<ExportSettings />} />
           <Route path="categories" element={<CategoriesSettings />} />
           <Route path="users" element={<UsersSettings />} />
+          <Route path="teams" element={<TeamsSettings />} />
+          <Route path="operations" element={<OperationsSettings />} />
           <Route path="languages" element={<LanguagesSettings />} />
           <Route path="email" element={<NotificationsSettings />} />
           <Route path="ai" element={<AiSettings />} />
