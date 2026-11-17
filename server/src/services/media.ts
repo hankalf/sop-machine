@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import type { MediaItem } from '../../../shared/types';
+import type { Markup, MediaItem } from '../../../shared/types';
 import { config } from '../config';
 import { db } from '../db';
 import { badRequest, newId, notFound, nowIso } from '../util';
@@ -20,6 +20,7 @@ interface MediaRow {
   height: number | null;
   duration: number | null;
   parent_id: string | null;
+  markup: string | null;
   processing: number;
   storage: StorageLocation;
   created_by: string | null;
@@ -66,7 +67,13 @@ const toItem = (r: MediaRow): MediaItem => ({
   parentId: r.parent_id,
   processing: !!r.processing,
   createdAt: r.created_at,
+  markup: r.markup ? (JSON.parse(r.markup) as Markup) : null,
 });
+
+/** Keep the shapes behind a marked-up image so it can be edited again later. */
+export function setMarkup(id: string, markup: Markup | null) {
+  db.prepare('UPDATE media SET markup = ? WHERE id = ?').run(markup ? JSON.stringify(markup) : null, id);
+}
 
 function row(id: string): MediaRow {
   const r = db.prepare('SELECT * FROM media WHERE id = ?').get(id) as MediaRow | undefined;

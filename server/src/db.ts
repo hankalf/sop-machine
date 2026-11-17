@@ -279,6 +279,10 @@ const migrations: string[] = [
   );
   CREATE INDEX quiz_sop ON quiz_attempts(sop_id, created_at);
   `,
+  // 4: editable markup on images
+  `
+  ALTER TABLE media ADD COLUMN markup TEXT;
+  `,
 ];
 
 function migrate() {

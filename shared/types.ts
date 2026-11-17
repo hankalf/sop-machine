@@ -176,6 +176,38 @@ export interface MediaItem {
   parentId: string | null;
   processing: boolean;
   createdAt: string;
+  /** Set on a marked-up image: the shapes, so the markup can be edited again on top of `baseId`. */
+  markup: Markup | null;
+}
+
+export type MarkupTool = 'rect' | 'ellipse' | 'arrow' | 'line' | 'pen' | 'highlight' | 'marker' | 'text' | 'note' | 'redact';
+
+/**
+ * One shape on an image. Coordinates are fractions (0–1) of the image's width and height.
+ * rect/ellipse/highlight/redact: corners (x1,y1)-(x2,y2). arrow/line: tail (x1,y1) to tip (x2,y2).
+ * pen: `points`. marker: centre (x1,y1), number `n`, optional key text. text: top-left (x1,y1).
+ * note: box top-left (x1,y1); when `pointer`, a line runs from the box to (x2,y2).
+ */
+export interface MarkupShape {
+  id: string;
+  tool: MarkupTool;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  size: 's' | 'm' | 'l';
+  text?: string;
+  n?: number;
+  points?: [number, number][];
+  pointer?: boolean;
+}
+
+export interface Markup {
+  v: 1;
+  /** The image the shapes are drawn on (the clean original). */
+  baseId: string;
+  shapes: MarkupShape[];
 }
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
-import type { CalloutType, GenerationJob, JobStatus, JobType, SopContent, Step, User } from '../../../shared/types';
+import type { CalloutType, GenerationJob, JobStatus, JobType, MarkupShape, SopContent, Step, User } from '../../../shared/types';
 import { emptyContent } from '../../../shared/defaults';
 import { config } from '../config';
 import { db } from '../db';
@@ -10,7 +10,7 @@ import { newId, notFound, nowIso } from '../util';
 import { type FrameInput, type GeneratedSop, type GenerationContext, sopFromExistingDocument, sopFromFrames, sopFromText, translateSop } from './ai';
 import { extractDocument } from './documents';
 import { extractFrame, probe, sampleGrayFrames } from './ffmpeg';
-import { getMedia, migrateToObjectStorage, originalLocalPath, storeBuffer } from './media';
+import { getMedia, migrateToObjectStorage, originalLocalPath, setMarkup, storeBuffer } from './media';
 import { getSettings } from './settings';
 import { formatTranscript, transcribeVideo, transcriptionConfigured } from './transcribe';
 import { createSop, getSop } from './sops';
@@ -283,7 +283,10 @@ async function drawHighlight(image: Buffer, box: { x: number; y: number; width: 
   const bh = Math.min(h - y, Math.round(box.height * scale) + pad * 2);
   if (bw < 6 || bh < 6) return null;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><rect x="${x + stroke / 2}" y="${y + stroke / 2}" width="${bw - stroke}" height="${bh - stroke}" rx="${stroke * 2}" fill="none" stroke="#ef4444" stroke-width="${stroke}"/></svg>`;
-  return sharp(image).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 90 }).toBuffer();
+  const buffer = await sharp(image).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 90 }).toBuffer();
+  // The same box as an editable shape, so it can be moved or removed in the markup editor.
+  const shape: MarkupShape = { id: newId(), tool: 'rect', x1: x / w, y1: y / h, x2: (x + bw) / w, y2: (y + bh) / h, color: '#ef4444', size: 'm' };
+  return { buffer, shape };
 }
 
 function toContent(gen: GeneratedSop): SopContent {
@@ -377,7 +380,10 @@ async function runRecording(jobId: string, input: RecordingJobInput, user: User)
       let mediaId = clean.id;
       if (settings.ai.autoHighlight && s.highlight) {
         const marked = await drawHighlight(f.full, s.highlight, f.scale).catch(() => null);
-        if (marked) mediaId = (await storeBuffer(marked, `frame-${f.label.replace(':', 'm')}s-highlight.jpg`, 'image/jpeg', user.id, clean.id)).id;
+        if (marked) {
+          mediaId = (await storeBuffer(marked.buffer, `frame-${f.label.replace(':', 'm')}s-highlight.jpg`, 'image/jpeg', user.id, clean.id)).id;
+          setMarkup(mediaId, { v: 1, baseId: clean.id, shapes: [marked.shape] });
+        }
       }
       content.steps[i].media.push({ mediaId, caption: '' });
     }

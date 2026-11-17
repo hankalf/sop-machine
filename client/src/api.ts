@@ -1,4 +1,5 @@
 import type {
+  Markup,
   ActionCounts,
   CorrectiveAction,
   DashboardData,
@@ -148,10 +149,11 @@ export const api = {
     startRun: (id: string, language: string) => post<ChecklistRun>(`/api/sops/${id}/runs`, { language }),
   },
   media: {
-    upload: (files: File[], opts: { parentId?: string; onProgress?: (pct: number) => void } = {}) => {
+    upload: (files: File[], opts: { parentId?: string; markup?: Markup; onProgress?: (pct: number) => void } = {}) => {
       const form = new FormData();
-      for (const f of files) form.append('files', f, f.name);
       if (opts.parentId) form.append('parentId', opts.parentId);
+      if (opts.markup) form.append('markup', JSON.stringify(opts.markup));
+      for (const f of files) form.append('files', f, f.name);
       return uploadForm<MediaItem[]>('/api/media', form, opts.onProgress);
     },
     get: (id: string) => get<MediaItem>(`/api/media/${id}`),

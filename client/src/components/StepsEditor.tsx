@@ -74,14 +74,20 @@ export function MediaGrid({
                   </span>
                 </>
               ) : (
-                <img src={mediaUrl(item.mediaId, 'thumb')} alt="" className="size-full object-contain" />
+                <button type="button" className="size-full cursor-pointer" onClick={() => m && setAnnotating(m)} aria-label="Mark up this picture" tabIndex={-1}>
+                  <img src={mediaUrl(item.mediaId, 'thumb')} alt="" className="size-full object-contain" />
+                </button>
+              )}
+              {m?.kind === 'image' && (
+                <button
+                  type="button"
+                  onClick={() => setAnnotating(m)}
+                  className="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-md bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:bg-white hover:text-brand"
+                >
+                  <PenTool className="size-3" /> {m.markup ? 'Edit markup' : 'Mark up'}
+                </button>
               )}
               <div className="absolute inset-x-0 top-0 flex justify-end gap-0.5 bg-gradient-to-b from-black/50 to-transparent p-1 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
-                {m?.kind === 'image' && (
-                  <IconButton label="Mark up (boxes, arrows, redact)" className="size-7 text-white hover:bg-white/20 hover:text-white" onClick={() => setAnnotating(m)}>
-                    <PenTool className="size-3.5" />
-                  </IconButton>
-                )}
                 <IconButton label="Move left" className="size-7 text-white hover:bg-white/20 hover:text-white" onClick={() => move(i, -1)} disabled={i === 0}>
                   <ChevronLeft className="size-4" />
                 </IconButton>
